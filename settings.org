@@ -1,0 +1,1646 @@
+#+STARTUP: overview
+* Appearance, UI Elements, and Emacs server
+  First, start a server, and then set some important appearance settings. Note that some of the settings (especially the color theme) are still in the "real" init.el
+** Helpers
+   Small litle helpers which make it easier to live-reload the config:
+#+BEGIN_SRC emacs-lisp
+  (defun reload-settings ()
+    (interactive)
+    (org-babel-load-file "~/.emacs.d/settings.org"))
+  (defun settings ()
+    (interactive)
+    (find-file "~/.emacs.d/settings.org"))
+#+END_SRC
+
+** Server
+   Start Server first, but only if emacs is not currently runnig.
+#+BEGIN_SRC emacs-lisp
+  (load "server")
+  (unless (server-running-p)(server-start))
+  (add-hook 'server-switch-hook
+	    (lambda ()
+	      (when (current-local-map)
+		(use-local-map (copy-keymap (current-local-map))))
+	      (local-set-key (kbd "C-x k") 'server-edit)))
+#+END_SRC
+** Appearance
+*** Theme & Faces
+#+BEGIN_SRC  emacs-lisp
+  (load-theme 'wheatgrass)
+;;  (set-face-attribute 'default nil : height 94)
+;;  (set-face-attribute 'fringe nil : background "#2d2d2d")
+;;  (set-face-attribute 'default nil : family "Source Code Pro")
+;;  (set-face-attribute 'font-lock-comment-face nil :slant 'italic)
+;;  (set-face-attribute 'font-lock-comment-face nil :weight 'semibold)
+;;  (set-fontset-font "fontset-default" 'unicode "DejaVu Sans Mono for Powerline")
+#+END_SRC
+*** UI Elements
+    Get rid of all those fancy UI elements that we don't need.
+#+BEGIN_SRC emacs-lisp
+  (menu-bar-mode -1)
+  (when (display-graphic-p)
+    (tool-bar-mode -1)
+    (tool-bar-mode -1))
+#+END_SRC
+Remove the strange white line between fringes
+#+BEGIN_SRC emacs-lisp
+  (set-face-attribute 'vertical-border nil :foreground (face-attribute 'fringe :background))
+#+END_SRC
+*** Welcome Screen
+    We also want to get rid of teh splash screen and start in the home directory
+#+BEGIN_SRC emacs-lisp
+  (setq inhibit-startup-message t)
+  (setq inhibit-splash-screen t)
+  (setq initial-scratch-message nil)
+  (setq initial-buffer-choice "~/")
+#+END_SRC
+** Scrolling
+#+BEGIN_SRC emacs-lisp
+  (setq scroll-step 1
+	scroll-conservatively 10000)
+#+END_SRC
+* Autosave and BackupFiles
+#+BEGIN_SRC emacs-lisp 
+  (defvar backup-dir (expand-file-name "~/.emacs.d/emacs_backup/"))
+  (defvar autosave-dir (expand-file-name "~/.emacs.d/autosave/"))
+  (setq backup-directory-alist (list (cons ".*" backup-dir)))
+  (setq auto-save-list-file-prefix autosave-dir)
+  (setq auto-save-file-name-transforms `((".*" ,autosave-dir t)))
+  (setq tramp-backup-directory-alist backup-directory-alist)
+  (setq tramp-auto-save-directory autosave-dir)
+#+END_SRC
+* Trailing white space
+#+BEGIN_SRC emacs-lisp
+  (require 'whitespace)
+  (setq-default show-trailing-whitespace t)
+#+END_SRC
+** Don't show trailing whitespace in some modes
+#+BEGIN_SRC emacs-lisp
+  (defun no-trailing-whitespace ()
+    (setq show-trailing-whitespace nil))
+
+  (add-hook 'minibuffer-setup-hook
+	    'no-trailing-whitespace)
+  (add-hook 'eww-mode-hook
+	    'no-trailing-whitespace)
+  (add-hook 'ielm-mode-hook
+	    'no-trailing-whitespace)
+  (add-hook 'gdb-mode-hook
+	    'no-trailing-whitespace)
+  (add-hook 'help-mode-hook
+	    'no-trailing-whitespace)
+#+END_SRC
+* Dired
+** General Settings
+   The first two lines of this tell dired to stop asking me whether I want to recursively delete or copy, since I never respond to that question with "No".
+
+   The last line enables "Do What I Mean" mode for dired: If I'm in a split frame with two dired buffers, the default target to copy (and rename) will be the other window.
+#+BEGIN_SRC emacs-lisp
+  (setq dired-recursive-copies 'always)
+  (setq dired-recursive-deletes 'always)
+  (setq dired-dwim-target t)
+  (setq dired-listing-switches "-alh")
+#+END_SRC
+** Automatically revert dired buffers
+   I also want dired to automatically revert, but to be quiet about it. The first line actually enables auto-revert for any buffers.
+#+BEGIN_SRC emacs-lisp
+  (global-auto-revert-mode 1)
+  (setq global-auto-revert-non-file-buffers t)
+  (setq auto-revert-verbose nil)
+#+END_SRC
+** Less verbosity
+   We can show file details using the ( and ) keys.
+   We want to omit the . and .. files, which are shown in dired by default.
+#+BEGIN_SRC emacs-lisp
+  (require 'dired-details)
+  (setq dired-details-hidden-string "")
+  (dired-details-install)
+
+  (setq-default dired-omit-mode t)
+  (setq-default dired-omit-verbose nil)
+  (setq-default dired-omit-files "^\\.$\\|^\\.\\.$")
+#+END_SRC
+** Opening Files
+   This is mostly stolen from here. Uses nohup to spawn child processes without annoying new buffers. First, we define a list of default programs.
+#+BEGIN_SRC emacs-lisp
+  (require 'dired-x)
+  (require 'dired-aux)
+
+  (setq dired-guess-shell-alist-user
+	'(("\\.pdf\\'" "evince")
+	  ("\\.\\(?:djvu\\|eps\\)\\'" "zathura")
+	  ("\\.\\(?:jpg\\|jpeg\\|png\\|gif\\|xpm\\)\\'" "eog")
+	  ("\\.\\(?:xcf\\)\\'" "gimp")
+	  ("\\.\\(?:csv\\|odt\\|ods\\)\\'" "libreoffice")
+	  ("\\.\\(?:mp4\\|mp3\\|mkv\\|avi\\|flv\\|ogv\\)\\(?:\\.part\\)?\\'"
+	   "vlc")
+	  ("\\.html?\\'" "firefox")))
+
+
+  (defvar dired-filelist-cmd
+    '(("vlc" "-L")))
+
+  (defun dired-start-process (cmd &optional file-list)
+    (interactive
+     (let ((files (dired-get-marked-files
+		   t current-prefix-arg)))
+       (list
+	(dired-read-shell-command "Open with: "
+				  current-prefix-arg files)
+	files)))
+    (let (list-switch)
+      (start-process
+       cmd nil shell-file-name
+       shell-command-switch
+       (format
+	"nohup 1>/dev/null 2>/dev/null %s \"%s\""
+	(if (and (> (length file-list) 1)
+		 (setq list-switch
+		       (cadr (assoc cmd dired-filelist-cmd))))
+	    (format "%s %s" cmd list-switch)
+	  cmd)
+	(mapconcat #'expand-file-name file-list "\" \"")))))
+
+  (define-key dired-mode-map "!" 'dired-do-async-shell-command)
+  (define-key dired-mode-map "&" 'dired-start-process)
+
+#+END_SRC
+** Line Numbers
+#+BEGIN_SRC emacs-lisp
+  (require 'linum)
+  (set-face-attribute 'linum nil
+		      :background (face-attribute 'default :background)
+		      :foreground (face-attribute 'font-lock-comment-face :foreground))
+  (defface linum-current-line-face
+    `((t :background "gray30" :foreground "gold"))
+    "Face for the currently active Line number")
+  (defvar my-linum-current-line-number 0)
+  (defun get-linum-format-string ()
+    (setq-local my-linum-format-string
+		(let ((w (length (number-to-string
+				  (count-lines (point-min) (point-max))))))
+		  (concat " %" (number-to-string w) "d "))))
+  (add-hook 'linum-before-numbering-hook 'get-linum-format-string)
+  (defun my-linum-format (line-number)
+    (propertize (format my-linum-format-string line-number) 'face
+		(if (eq line-number my-linum-current-line-number)
+		    'linum-current-line-face
+		  'linum)))
+  (setq linum-format 'my-linum-format)
+  (defadvice linum-update (around my-linum-update)
+    (let ((my-linum-current-line-number (line-number-at-pos)))
+      ad-do-it))
+  (ad-activate 'linum-update)
+
+
+  (require 'linum-relative)
+  (linum-relative-global-mode t)
+
+  (defun num ()
+    (interactive)
+    (if (bound-and-true-p relative-line-numbers-mode)
+	(relative-line-numbers-mode 'toggle))
+    (linum-mode 'toggle))
+  (defun rnum ()
+    (interactive)
+    (if (bound-and-true-p linum-mode)
+	(linum-mode 'toggle))
+    (relative-line-numbers-mode 'toggle))
+#+END_SRC
+** Fringe
+#+BEGIN_SRC emacs-lisp
+  (fringe-mode '(4 . 4))
+#+END_SRC
+** Powerline
+#+BEGIN_SRC emacs-lisp
+  (column-number-mode 1)
+  (require 'powerline)
+  (if (display-graphic-p)
+      (progn
+	(setq powerline-default-separator 'wave)
+	(setq powerline-height 25)))
+  (setq powerline-default-separator-dir '(right . left))
+
+  ;; first reset the faces that already exist
+  (set-face-attribute 'mode-line nil
+		      :foreground (face-attribute 'default :foreground)
+		      :family "Fira Sans"
+		      :weight 'bold
+		      :background (face-attribute 'fringe :background))
+  (set-face-attribute 'mode-line-inactive nil
+		      :foreground (face-attribute 'font-lock-comment-face :foreground)
+		      :background (face-attribute 'fringe :background)
+		      :family "Fira Sans"
+		      :weight 'bold
+		      :box `(:line-width -2 :color ,(face-attribute 'fringe :background)))
+  (set-face-attribute 'powerline-active1 nil
+		      :background "gray30")
+  (set-face-attribute 'powerline-inactive1 nil
+		      :background (face-attribute 'default :background)
+		      :box `(:line-width -2 :color ,(face-attribute 'fringe :background)))
+
+  ;; these next faces are for the status indicator
+  ;; read-only buffer
+  (make-face 'mode-line-read-only-face)
+  (make-face 'mode-line-read-only-inactive-face)
+  (set-face-attribute 'mode-line-read-only-face nil
+		      :foreground (face-attribute 'default :foreground)
+		      :inherit 'mode-line)
+  (set-face-attribute 'mode-line-read-only-inactive-face nil
+		      :foreground (face-attribute 'default :foreground)
+		      :inherit 'mode-line-inactive)
+
+  ;; modified buffer
+  (make-face 'mode-line-modified-face)
+  (make-face 'mode-line-modified-inactive-face)
+  (set-face-attribute 'mode-line-modified-face nil
+		      :foreground (face-attribute 'default :background)
+		      :background "#e5786d"
+		      :inherit 'mode-line)
+  (set-face-attribute 'mode-line-modified-inactive-face nil
+		      :foreground (face-attribute 'default :background)
+		      :background "#e5786d"
+		      :inherit 'mode-line-inactive)
+
+  ;; unmodified buffer
+  (make-face 'mode-line-unmodified-face)
+  (make-face 'mode-line-unmodified-inactive-face)
+  (set-face-attribute 'mode-line-unmodified-face nil
+		      :foreground (face-attribute 'font-lock-comment-face :foreground)
+		      :inherit 'mode-line)
+  (set-face-attribute 'mode-line-unmodified-inactive-face nil
+		      :foreground (face-attribute 'font-lock-comment-face :foreground)
+		      :inherit 'mode-line-inactive)
+
+  ;; the remote indicator
+  (make-face 'mode-line-remote-face)
+  (make-face 'mode-line-remote-inactive-face)
+  (set-face-attribute 'mode-line-remote-face nil
+		      :foreground (face-attribute 'font-lock-comment-face :foreground)
+		      :background (face-attribute 'default :background)
+		      :inherit 'mode-line)
+  (set-face-attribute 'mode-line-remote-inactive-face nil
+		      :foreground (face-attribute 'font-lock-comment-face :foreground)
+		      :background (face-attribute 'default :background)
+		      :inherit 'mode-line-inactive)
+
+  ;; the current file name
+  (make-face 'mode-line-filename-face)
+  (make-face 'mode-line-filename-inactive-face)
+  (set-face-attribute 'mode-line-filename-face nil
+		      :foreground (face-attribute 'font-lock-type-face :foreground)
+		      :background (face-attribute 'default :background)
+		      :inherit 'mode-line)
+  (set-face-attribute 'mode-line-filename-inactive-face nil
+		      :foreground (face-attribute 'font-lock-comment-face :foreground)
+		      :background (face-attribute 'default :background)
+		      :inherit 'mode-line-inactive)
+
+  ;; the major mode name
+  (make-face 'mode-line-major-mode-face)
+  (make-face 'mode-line-major-mode-inactive-face)
+  (set-face-attribute 'mode-line-major-mode-face nil
+		      :foreground (face-attribute 'default :foreground)
+		      :inherit 'powerline-active1)
+  (set-face-attribute 'mode-line-major-mode-inactive-face nil
+		      :box `(:line-width -2 :color ,(face-attribute 'fringe :background))
+		      :foreground (face-attribute 'font-lock-comment-face :foreground)
+		      :inherit 'powerline-inactive1)
+
+  ;; the minor mode name
+  (make-face 'mode-line-minor-mode-face)
+  (make-face 'mode-line-minor-mode-inactive-face)
+  (set-face-attribute 'mode-line-minor-mode-face nil
+		      :foreground (face-attribute 'font-lock-comment-face :foreground)
+		      :inherit 'powerline-active1)
+  (set-face-attribute 'mode-line-minor-mode-inactive-face nil
+		      :box `(:line-width -2 :color ,(face-attribute 'fringe :background))
+		      :foreground (face-attribute 'powerline-inactive1 :background)
+		      :inherit 'powerline-inactive1)
+
+  ;; the position face
+  (make-face 'mode-line-position-face)
+  (make-face 'mode-line-position-inactive-face)
+  (set-face-attribute 'mode-line-position-face nil
+		      :background (face-attribute 'default :background)
+		      :inherit 'mode-line)
+  (set-face-attribute 'mode-line-position-inactive-face nil
+		      :foreground (face-attribute 'font-lock-comment-face :foreground)
+		      :background (face-attribute 'default :background)
+		      :inherit 'mode-line-inactive)
+
+  ;; the 80col warning face
+  (make-face 'mode-line-80col-face)
+  (make-face 'mode-line-80col-inactive-face)
+  (set-face-attribute 'mode-line-80col-face nil
+		      :background "#e5786d"
+		      :foreground (face-attribute 'default :background)
+		      :inherit 'mode-line)
+  (set-face-attribute 'mode-line-80col-inactive-face nil
+		      :foreground (face-attribute 'font-lock-comment-face :foreground)
+		      :background (face-attribute 'default :background)
+		      :inherit 'mode-line-inactive)
+
+  ;; the buffer percentage face
+  (make-face 'mode-line-percentage-face)
+  (make-face 'mode-line-percentage-inactive-face)
+  (set-face-attribute 'mode-line-percentage-face nil
+		      :foreground (face-attribute 'font-lock-comment-face :foreground)
+		      :inherit 'mode-line)
+  (set-face-attribute 'mode-line-percentage-inactive-face nil
+		      :foreground (face-attribute 'font-lock-comment-face :foreground)
+		      :inherit 'mode-line-inactive)
+
+  ;; the directory face
+  (make-face 'mode-line-shell-dir-face)
+  (make-face 'mode-line-shell-dir-inactive-face)
+  (set-face-attribute 'mode-line-shell-dir-face nil
+		      :foreground (face-attribute 'font-lock-comment-face :foreground)
+		      :inherit 'powerline-active1)
+  (set-face-attribute 'mode-line-shell-dir-inactive-face nil
+		      :foreground (face-attribute 'font-lock-comment-face :foreground)
+		      :inherit 'powerline-inactive1)
+
+  (defun shorten-directory (dir max-length)
+    "Show up to `max-length' characters of a directory name `dir'."
+    (let ((path (reverse (split-string (abbreviate-file-name dir) "/")))
+	  (output ""))
+      (when (and path (equal "" (car path)))
+	(setq path (cdr path)))
+      (while (and path (< (length output) (- max-length 4)))
+	(setq output (concat (car path) "/" output))
+	(setq path (cdr path)))
+      (when path
+	(setq output (concat ".../" output)))
+      output))
+
+  (defpowerline dennis-powerline-narrow
+    (let (real-point-min real-point-max)
+      (save-excursion
+	(save-restriction
+	  (widen)
+	  (setq real-point-min (point-min) real-point-max (point-max))))
+      (when (or (/= real-point-min (point-min))
+		(/= real-point-max (point-max)))
+	(propertize (concat (char-to-string #x2691) " Narrow")
+		    'mouse-face 'mode-line-highlight
+		    'help-echo "mouse-1: Remove narrowing from the current buffer"
+		    'local-map (make-mode-line-mouse-map
+				'mouse-1 'mode-line-widen)))))
+
+  (defpowerline dennis-powerline-vc
+    (when (and (buffer-file-name (current-buffer)) vc-mode)
+      (if window-system
+	  (let ((backend (vc-backend (buffer-file-name (current-buffer)))))
+	    (when backend
+	      (format "%s %s: %s"
+		      (char-to-string #xe0a0)
+		      backend
+		      (vc-working-revision (buffer-file-name (current-buffer)) backend)))))))
+
+  (setq-default
+   mode-line-format
+   '("%e"
+     (:eval
+      (let* ((active (powerline-selected-window-active))
+
+	     ;; toggle faces between active and inactive
+	     (mode-line (if active 'mode-line 'mode-line-inactive))
+	     (face1 (if active 'powerline-active1 'powerline-inactive1))
+	     (face2 (if active 'powerline-active2 'powerline-inactive2))
+	     (read-only-face (if active 'mode-line-read-only-face 'mode-line-read-only-inactive-face))
+	     (modified-face (if active 'mode-line-modified-face 'mode-line-modified-inactive-face))
+	     (unmodified-face (if active 'mode-line-unmodified-face 'mode-line-unmodified-inactive-face))
+	     (position-face (if active 'mode-line-position-face 'mode-line-position-inactive-face))
+	     (80col-face (if active 'mode-line-80col-face 'mode-line-80col-inactive-face))
+	     (major-mode-face (if active 'mode-line-major-mode-face 'mode-line-major-mode-inactive-face))
+	     (minor-mode-face (if active 'mode-line-minor-mode-face 'mode-line-minor-mode-inactive-face))
+	     (filename-face (if active 'mode-line-filename-face 'mode-line-filename-inactive-face))
+	     (percentage-face (if active 'mode-line-percentage-face 'mode-line-percentage-inactive-face))
+	     (remote-face (if active 'mode-line-remote-face 'mode-line-remote-inactive-face))
+	     (shell-dir-face (if active 'mode-line-shell-dir-face 'mode-line-shell-dir-inactive-face))
+
+	     ;; get the separators
+	     (separator-left (intern (format "powerline-%s-%s"
+					     (powerline-current-separator)
+					     (car powerline-default-separator-dir))))
+	     (separator-right (intern (format "powerline-%s-%s"
+					      (powerline-current-separator)
+					      (cdr powerline-default-separator-dir))))
+
+	     ;; the right side
+	     (rhs (list
+		   (dennis-powerline-vc minor-mode-face 'r)
+		   (funcall separator-right face1 position-face)
+		   (powerline-raw " " position-face)
+		   (powerline-raw (char-to-string #xe0a1) position-face)
+		   (powerline-raw " " position-face)
+		   (powerline-raw "%4l" position-face 'r)
+		   ;; display a warning if we go above 80 columns
+		   (if (>= (current-column) 80)
+		       (funcall separator-right position-face 80col-face)
+		     (powerline-raw (char-to-string #x2502) position-face))
+		   (if (>= (current-column) 80)
+		       (powerline-raw "%3c" 80col-face 'l)
+		     (powerline-raw "%3c" position-face 'l))
+		   (if (>= (current-column) 80)
+		       (powerline-raw " " 80col-face)
+		     (powerline-raw " " position-face))
+		   (if (>= (current-column) 80)
+		       (funcall separator-left 80col-face percentage-face)
+		     (funcall separator-left position-face percentage-face))
+		   (powerline-raw " " percentage-face)
+		   (powerline-raw "%6p" percentage-face 'r)))
+
+	     ;; the left side
+	     (lhs (list
+		   ;; this is the modified status indicator
+		   (cond (buffer-read-only
+			  (powerline-raw "  " read-only-face))
+			 ((buffer-modified-p)
+			  ;; do not light up when in an interactive buffer. Set
+			  ;; ML-INTERACTIVE? in hooks for interactive buffers.
+			  (if (not (bound-and-true-p ml-interactive?))
+			      (powerline-raw "  " modified-face)
+			    (powerline-raw "  " unmodified-face)))
+			 ((not (buffer-modified-p))
+			  (powerline-raw "  " unmodified-face)))
+		   (cond (buffer-read-only
+			  (powerline-raw (concat (char-to-string #xe0a2) " ") read-only-face 'l))
+			 ((buffer-modified-p)
+			  (if (not (bound-and-true-p ml-interactive?))
+			      (powerline-raw (concat (char-to-string #x2621) " ") modified-face 'l)
+			    (powerline-raw (concat (char-to-string #x259e) " ") unmodified-face 'l)))
+			 ((not (buffer-modified-p))
+			  (powerline-raw (concat (char-to-string #x26c1) " ") unmodified-face 'l)))
+		   (cond (buffer-read-only
+			  (funcall separator-right read-only-face filename-face))
+			 ((buffer-modified-p)
+			  (if (not (bound-and-true-p ml-interactive?))
+			      (funcall separator-right modified-face filename-face)
+			    (funcall separator-right unmodified-face filename-face)))
+			 ((not (buffer-modified-p))
+			  (funcall separator-right unmodified-face filename-face)))
+		   ;; remote indicator
+		   (when (file-remote-p default-directory)
+		     (powerline-raw (concat " " (char-to-string #x211b)) remote-face))
+		   ;; filename and mode info
+		   (powerline-buffer-id filename-face 'l)
+		   (powerline-raw " " filename-face)
+		   (funcall separator-left filename-face major-mode-face)
+		   ;; do not need mode info when in ansi-term
+		   (unless (bound-and-true-p show-dir-in-mode-line?)
+		     (powerline-major-mode major-mode-face 'l))
+		   (unless (bound-and-true-p show-dir-in-mode-line?)
+		     (powerline-process major-mode-face 'l))
+		   ;; show a flag if in line mode in terminal
+		   (when (and (bound-and-true-p show-dir-in-mode-line?) (term-in-line-mode))
+		     (powerline-raw (concat (char-to-string #x2691) " Line") major-mode-face))
+		   (powerline-raw " " major-mode-face)
+		   ;; little trick to move the directory name to the mode line
+		   ;; when inside of emacs set SHOW-DIR-IN-MODE-LINE? to enable
+		   (if (bound-and-true-p show-dir-in-mode-line?)
+		       (when (not (file-remote-p default-directory))
+			 (powerline-raw (shorten-directory default-directory 45)
+					shell-dir-face))
+		     (powerline-minor-modes minor-mode-face 'l))
+		   (unless (bound-and-true-p show-dir-in-mode-line?)
+		     (dennis-powerline-narrow major-mode-face 'l)))))
+
+	;; concatenate it all together
+	(concat (powerline-render lhs)
+		(powerline-fill face1 (powerline-width rhs))
+		(powerline-render rhs))))))
+
+#+END_SRC
+* Cursor
+#+BEGIN_SRC emacs-lisp
+
+  (defun dennis-set-cursor ()
+    (set-cursor-color "gold") ;; set cursor color to gold
+    (set-face-attribute 'region nil :background "gold" :foreground "black")
+    (set-face-background 'highlight "gray30")
+    (set-face-foreground 'highlight nil)
+    (set-face-underline 'highlight nil)
+    (cond
+     (buffer-read-only
+      (setq cursor-type 'box))
+     (t
+      (setq cursor-type 'bar)))
+    ;; red cursor for overwrite mode
+    (when overwrite-mode
+      (set-cursor-color "red")))
+  (dennis-set-cursor)
+
+#+END_SRC
+
+* Spaces and Tabs
+#+BEGIN_SRC emacs-lisp
+  (setq-default indent-tabs-mode nil)
+  (setq-default tab-width 2)
+  (setq-default tab-stop-list (number-sequence 2 120 2))
+  (setq c-basic-indent 2)
+  (setq sh-basic-offset 2)
+
+  (defun my-tabs-makefile-hook ()
+    (setq indent-tabs-mode t))
+  (add-hook 'makefile-mode-hook 'my-tabs-makefile-hook)
+#+END_SRC
+
+* Parentheses
+#+BEGIN_SRC emacs-lisp
+(require 'highlight-parentheses)
+  (show-paren-mode 1)
+  (setq show-paren-delay 0)
+
+  (define-globalized-minor-mode global-highlight-parentheses-mode
+    highlight-parentheses-mode
+    (lambda ()
+      (highlight-parentheses-mode t)))
+  (global-highlight-parentheses-mode t)
+
+  (require 'rainbow-delimiters)
+
+  (set-face-attribute 'rainbow-delimiters-depth-1-face nil
+		      :foreground "#78c5d6")
+  (set-face-attribute 'rainbow-delimiters-depth-2-face nil
+		      :foreground "#bf62a6")
+  (set-face-attribute 'rainbow-delimiters-depth-3-face nil
+		      :foreground "#459ba8")
+  (set-face-attribute 'rainbow-delimiters-depth-4-face nil
+		      :foreground "#e868a2")
+  (set-face-attribute 'rainbow-delimiters-depth-5-face nil
+		      :foreground "#79c267")
+  (set-face-attribute 'rainbow-delimiters-depth-6-face nil
+		      :foreground "#f28c33")
+  (set-face-attribute 'rainbow-delimiters-depth-7-face nil
+		      :foreground "#c5d647")
+  (set-face-attribute 'rainbow-delimiters-depth-8-face nil
+		      :foreground "#f5d63d")
+  (set-face-attribute 'rainbow-delimiters-depth-9-face nil
+		      :foreground "#78c5d6")
+
+  (set-face-attribute 'rainbow-delimiters-unmatched-face nil
+		      :foreground 'unspecified
+		      :inherit 'show-paren-mismatch
+		      :strike-through t)
+
+  (add-hook 'emacs-lisp-mode-hook 'rainbow-delimiters-mode)
+  (add-hook 'lisp-mode-hook 'rainbow-delimiters-mode)
+
+  (electric-pair-mode 1)
+#+END_SRC
+* Ibuffer
+** Filter Groups
+#+BEGIN_SRC emacs-lisp
+  (require 'ibuffer)
+  (setq my-ibuffer-filter-group-name "my-filters")
+  (setq ibuffer-saved-filter-groups
+        (list (nreverse
+               `(("Directories" (mode . dired-mode))
+                 ("Magit" (name . "^\\*magit.*$"))
+                 ("Org" (mode . org-mode))
+                 ("web" (or (mode . web-mode) (mode . js2-mode)))
+                 ("Shell" (or (mode . term-mode)
+                              (mode . eshell-mode)
+                              (mode . shell-mode)))
+                 ("mu4e" (name . "\*mu4e\*"))
+                 ("programming" (or
+                                 (mode . python-mode)
+                                 (mode . c++-mode)))
+                 ("emacs" (or
+                           (name . "^\\*scratch\\*$")
+                           (name . "^\\*Messages\\*$")))
+                 ("IRC" (mode . erc-mode))
+                 ("Global" (name . "^\\*.*\\*$"))
+                 ("Interactive" (or (mode . matlab-shell-mode)
+                                    (mode . inferior-julia-shell-mode)
+                                    (mode . inferior-python-mode)
+                                    (mode . inferior-octave-mode)
+                                    (mode . inferior-lisp-mode)
+                                    (mode . inferior-scheme-mode)
+                                    (mode . ielm-mode)))
+                 ,my-ibuffer-filter-group-name))))
+
+  (defadvice ibuffer-generate-filter-groups
+      (after reverse-ibuffer-groups () activate)
+    (setq ad-return-value (nreverse ad-return-value)))
+#+END_SRC
+** Other settings
+#+BEGIN_SRC emacs-lisp
+  (setq ibuffer-show-empty-filter-groups nil)
+  (setq ibuffer-display-summary nil)
+
+  ;; Use human readable Size column instead of original one
+  (define-ibuffer-column size-h
+    (:name "Size" :inline t)
+    (cond
+     ((> (buffer-size) 1000000) (format "%7.1fM" (/ (buffer-size) 1000000.0)))
+     ((> (buffer-size) 100000) (format "%7.0fk" (/ (buffer-size) 1000.0)))
+     ((> (buffer-size) 1000) (format "%7.1fk" (/ (buffer-size) 1000.0)))
+     (t (format "%8d" (buffer-size)))))
+
+  ;; Modify the default ibuffer-formats
+  (setq ibuffer-formats
+        '((mark modified read-only " "
+                (name 40 60 :left :elide)
+                " "
+                (size-h 9 -1 :right)
+                " "
+                (mode 16 16 :left :elide)
+                " "
+                filename-and-process)))
+#+END_SRC
+** Hooks
+#+BEGIN_SRC emacs-lisp
+
+
+  (defun my-ibuffer-hooks ()
+    (ibuffer-auto-mode 1)
+    (ibuffer-switch-to-saved-filter-groups my-ibuffer-filter-group-name)
+    (no-trailing-whitespace))
+  (add-hook 'ibuffer-mode-hook 'my-ibuffer-hooks)
+
+  (defalias 'list-buffers 'ibuffer)
+  (global-set-key (kbd "C-x C-b") 'ibuffer)
+#+END_SRC
+* Terminal Emulator
+** Choice of shell to launch
+#+BEGIN_SRC emacs-lisp
+
+  (defvar my-term-shell "/usr/bin/zsh")
+  (defadvice ansi-term (before force-bash)
+    (interactive (list my-term-shell)))
+  (ad-activate 'ansi-term)
+
+  (defadvice term-sentinel (around my-advice-term-sentinel (proc msg))
+    (if (memq (process-status proc) '(signal exit))
+        (let ((buffer (process-buffer proc)))
+          ad-do-it
+          (kill-buffer buffer))
+      ad-do-it))
+  (ad-activate 'term-sentinel)
+#+END_SRC
+** Mode Toggle and hooks
+#+BEGIN_SRC emacs-lisp
+  (defun term-toggle-mode ()
+    (interactive)
+    (if (term-in-line-mode)
+        (term-char-mode)
+      (term-line-mode)))
+
+  (defun my-term-hook ()
+    (goto-address-mode)
+    (local-set-key "\C-c\C-j" 'term-toggle-mode) ;; toggle line/char mode
+    (local-set-key "\C-c\C-k" 'term-toggle-mode)
+    (setq global-hl-line-mode nil)
+    (setq term-buffer-maximum-size 10000)
+    (setq-local ml-interactive? t) ;; for mode line
+    (setq-local show-dir-in-mode-line? t) ;; also mode linec'
+    (setq show-trailing-whitespace nil)
+    ;; disable company in favor of shell completion
+    (company-mode -1))
+  (add-hook 'term-mode-hook 'my-term-hook)
+
+  (defalias 'sh 'ansi-term)
+#+END_SRC
+* Org Mode
+** General Settings
+#+BEGIN_SRC emacs-lisp
+
+  (require 'org)
+  (setq-default
+   org-return-follows-link t
+   org-image-actual-width '(400)
+   org-highlight-latex-and-related '(latex script entities))
+
+  (setq
+   org-src-fontify-natively t
+   org-src-tab-acts-natively t)
+
+  (setq org-latex-listings 'minted)
+
+  (setq org-html-htmlize-output-type 'css)
+
+  (setq org-html-head
+        (with-temp-buffer
+          (let ((csstidy "csstidy")
+                (csstidy-args " --template=highest --silent=true")
+                (css-dir (file-name-as-directory "~/repos/blog/res"))
+                (css-files '("code.css" "main.css")))
+            (insert "<style type=\"text/css\">\n")
+            (dolist (file css-files)
+              (insert (shell-command-to-string
+                       (concat csstidy " " css-dir file csstidy-args))))
+            (insert "</style>")
+            (buffer-string))))
+
+  (setq org-latex-pdf-process (list "latexmk -f -pdf %f"))
+
+  (require 'ox-latex)
+  (add-to-list 'org-latex-classes
+               '("IEEEtran"
+                 "\\documentclass{IEEEtran}"
+                 ("\\section{%s}" . "\\section*{%s}")
+                 ("\\subsection{%s}" . "\\subsection*{%s}")
+                 ("\\subsubsection{%s}" . "\\subsubsection*{%s}")
+                 ("\\paragraph{%s}" . "\\paragraph*{%s}")))
+
+  (setq org-file-apps '((auto-mode . emacs)
+                        ("\\.x?html?\\'" . "firefox %s")
+                        ("\\.pdf\\'" . "evince \"%s\"")
+                        ("\\.pdf::\\([0-9]+\\)\\'" . "evince \"%s\" -p %1")
+                        ("\\.pdf.xoj" . "xournal %s")))
+
+  (org-babel-do-load-languages
+   'org-babel-load-languages
+   '(
+     (python . t)
+     (emacs-lisp . t)
+     (matlab . t)
+     (octave . t)
+     (latex . t)
+     (js . t)
+     (sh . t)
+     (C . t)
+     (ditaa . t)
+     ))
+
+  (setq org-babel-matlab-with-emacs-link nil)
+  (setq org-confirm-babel-evaluate nil)
+  (setq org-export-babel-evaluate nil) ;; can be bad for long simulations
+  ;;; display/update images in the buffer after I evaluate
+  (add-hook 'org-babel-after-execute-hook 'org-display-inline-images 'append)
+
+  (setq my-org-present-prettify-bullets-keywords
+        '(;; the regular "- " bullet
+          ("^ *\\- " ;; match line start followed by 0 or more spaces followed by "-" followed by a space
+           (0 (progn (put-text-property
+                      (match-beginning 0) (match-end 0)
+                      'display (concat ;; add spaces if necessary
+                                (make-string (- (match-end 0) (match-beginning 0) 2) 32)
+                                (char-to-string #x25B8) " ") ;; triangle
+                      nil))))
+          ;; the "+" bullet. add more as needed.
+          ("^ *\\+ "
+           (0 (progn (put-text-property
+                      (match-beginning 0) (match-end 0)
+                      'display (concat
+                                (make-string (- (match-end 0) (match-beginning 0) 2) 32)
+                                (char-to-string #x2022) " ") ;; bullet
+                      nil))))))
+
+  (defun my-org-present-prettify-bullets-setup ()
+    (font-lock-add-keywords nil
+                            my-org-present-prettify-bullets-keywords))
+  (defun my-org-present-prettify-bullets-teardown ()
+    (font-lock-remove-keywords nil
+                               my-org-present-prettify-bullets-keywords)
+    (remove-text-properties (point-min) (point-max) '(display nil))
+    (revert-buffer t t));; dirty, but works for now.
+
+
+  (use-package org-bullets
+     :ensure t
+     :config
+     (add-hook 'org-mode-hook (lambda () (org-bullets-mode 1))))
+
+   (custom-set-variables
+    '(org-directory "~/Documents/orgfiles")
+    '(org-default-notes-file (concat org-directory "/notes.org"))
+    '(org-export-html-postamble nil)
+    '(org-hide-leading-stars t)
+    '(org-startup-folded (quote overview))
+    '(org-startup-indented t)
+    )
+
+   (global-set-key "\C-ca" 'org-agenda)
+
+   (global-set-key (kbd "C-c c") 'org-capture)
+
+   (setq org-agenda-files (list "~/Documents/orgfiles/gcal.org"
+               "~/Documents/orgfiles/i.org"
+               "~/Documents/orgfiles/shedule.org"))
+   (setq org-capture-templates
+    '(("a" "Appointment" entry (file+headline "~/Documents/orgfiles/gcal.org" "Appointments")
+       "* TODO %?\n:PROPERTIES:\n\n:END\nDEADLINE: %^T \n %i\n")
+      ("n" "Note" entry (file+headline "~/Documents/orgfiles/notes.org" "Notes")
+       "* Note %?\n%T")
+      ("l" "Link" entry (file+headline "~/Documents/orgfiles/Links.org" "Links")
+       "* %? ?^L %^g \n%T" :prepend t)
+      ("b" "Blog idea" entry (file+headline "~/Documents/orgfiles/i.org" "Blog Topics")
+       "* %?\n%T" :prepend t)
+      ("t" "To Do Items" entry (file+headline "~/Documents/orgfiles/shedule.org" "To Do Items")
+       "* %?\n%T" :prepend t)
+
+      ("j" "Journal" entry (file+datetree "~/Documents/orgfiles/journal.org")
+       "*%?\nEntered on %U\n %i\n %a")))
+
+  (defun my-org-present-faces-setup ()
+    (let ((heading-height 450)
+          (heading-fam "Fira Sans")
+          (text-fam "Fira Sans")
+          (spacing 0.4))
+      (make-local-variable 'org-present-face-cookie-list)
+      (setq org-present-face-cookie-list nil)
+      ;; remap the heading face
+      (add-to-list 'org-present-face-cookie-list
+                   (face-remap-add-relative 'org-level-1
+                                            :family heading-fam
+                                            :height heading-height
+                                            :weight 'bold))
+      ;; remap the default face
+      (add-to-list 'org-present-face-cookie-list
+                   (face-remap-add-relative 'default
+                                            :family text-fam))
+      ;; disable grey bars in code blocks
+      (add-to-list 'org-present-face-cookie-list
+                   (face-remap-add-relative 'org-block-begin-line
+                                            :background (face-attribute 'default :background)))
+      (add-to-list 'org-present-face-cookie-list
+                   (face-remap-add-relative 'org-block-end-line
+                                            :background (face-attribute 'default :background)))
+      ;; add some spacing between lines
+      (setq-local line-spacing spacing)))
+
+  (defun my-org-present-faces-teardown ()
+    ;; restore the modified faces
+    (dolist (cookie org-present-face-cookie-list)
+      (face-remap-remove-relative cookie))
+    ;; restore the spacing
+    (setq-local line-spacing nil))
+
+  (defun my-org-present-setup ()
+    ;; do not want cursor or hl-line
+    (make-variable-buffer-local 'post-command-hook)
+    (remove-hook 'post-command-hook 'dennis-set-cursor)
+    (setq global-hl-line-mode nil)
+    ;; make it work with wireless presenter
+    (buffer-local-set-key (kbd "<next>") 'org-present-next)
+    (buffer-local-set-key (kbd "<prior>") 'org-present-prev)
+    ;; change other things to make it look like a presentation
+    (org-display-inline-images)
+    (org-present-hide-cursor)
+    (org-indent-mode)
+    (my-org-present-faces-setup)
+    (hidden-mode-line-mode)
+    (org-present-big)
+    (fringe-mode '(0 . 0))
+    (my-org-present-prettify-bullets-setup)
+    (org-present-read-only))
+
+  (defun my-org-present-teardown ()
+    (add-hook 'post-command-hook 'dennis-set-cursor)
+    (setq global-hl-line-mode t)
+    (buffer-local-set-key (kbd "<next>") nil)
+    (buffer-local-set-key (kbd "<prior>") nil)
+    (org-remove-inline-images)
+    (org-present-show-cursor)
+    (org-indent-mode -1)
+    (my-org-present-faces-teardown)
+    (hidden-mode-line-mode -1)
+    (org-present-small)
+    (fringe-mode '(4 . 4))
+    (org-present-read-write)
+    (my-org-present-prettify-bullets-teardown))
+
+  (add-hook 'org-present-mode-hook 'my-org-present-setup)
+  (add-hook 'org-present-mode-quit-hook 'my-org-present-teardown)
+#+END_SRC
+* Python
+** Flycheck
+#+BEGIN_SRC emacs-lisp
+  (use-package flycheck
+    :ensure t
+    :init
+    (global-flycheck-mode t))
+#+END_SRC
+** Jedi
+#+BEGIN_SRC emacs-lisp
+  (use-package jedi
+    :ensure t
+    :init
+    (add-hook 'python-mode-hook 'jedi:setup))
+#+END_SRC
+** IPython
+#+BEGIN_SRC emacs-lisp
+
+  (when (executable-find "ipython")
+    (setq
+     python-shell-interpreter "ipython3"
+     python-shell-interpreter-args "--simple-prompt -i"
+     python-shell-prompt-regexp "In \\[[0-9]+\\]: "
+     python-shell-prompt-output-regexp "Out\\[[0-9]+\\]: "
+     python-shell-completion-setup-code
+     "from IPython.core.completerlib import module_completion"
+     python-shell-completion-module-string-code
+     "';'.join(module_completion('''%s'''))\n"
+     python-shell-completion-string-code
+     "';'.join(get_ipython().Completer.all_completions('''%s'''))\n"))
+
+  (add-hook 'inferior-python-mode-hook 'no-trailing-whitespace)
+  (add-hook 'inferior-python-mode-hook
+            '(lambda ()
+               (setq-local ml-interactive? t)))
+#+END_SRC
+** Elpy
+#+BEGIN_SRC emacs-lisp
+  (use-package elpy
+    :ensure t
+    :disabled
+    :init
+    (with-eval-after-load 'python
+      (elpy-enable)
+      (elpy-use-ipython)
+      (delete 'elpy-module-highlight-indentation elpy-modules))
+    :config
+    (setq elpy-modules
+        (quote
+         (elpy-module-company
+          elpy-module-eldoc
+          elpy-module-pyvenv
+          elpy-module-yasnippet
+          elpy-module-sane-defaults))))
+#+END_SRC
+* Company
+#+BEGIN_SRC emacs-lisp
+
+  (require 'company)
+  (setq company-tooltip-align-annotations t)
+  (setq company-selection-wrap-around t)
+  (setq company-tooltip-flip-when-above t)
+  (setq company-idle-delay 0.0)
+  (add-hook 'after-init-hook 'global-company-mode)
+
+  (require 'company-dabbrev)
+  (require 'company-dabbrev-code)
+  (setq company-dabbrev-code-everywhere t)
+  (setq company-dabbrev-code-ignore-case nil)
+  (setq company-dabbrev-ignore-case nil)
+  (add-to-list 'company-dabbrev-code-modes 'julia-mode)
+  (add-to-list 'company-dabbrev-code-modes 'matlab-mode)
+  (add-to-list 'company-dabbrev-code-modes 'matlab-shell-mode)
+
+  (define-key company-active-map [tab] 'company-complete-common-or-cycle)
+  (define-key company-active-map (kbd "TAB") 'company-complete-common-or-cycle)
+
+  (require 'company-auctex)
+  (require 'company-math)
+  (require 'company-c-headers)
+  (add-to-list 'company-c-headers-path-system "/usr/include/c++/7.1.1/")
+
+  (defvar my-company-backends nil
+    "A list of my company backends")
+  (setq my-company-backends
+        '(company-auctex-labels
+          company-auctex-bibs
+          (company-auctex-macros company-auctex-symbols company-auctex-environments)
+          (company-math-symbols-latex company-math-symbols-unicode)
+          company-ispell
+          (company-semantic
+           company-clang company-c-headers)
+          company-bbdb
+          company-elisp
+          ac-js2-company
+          company-nxml
+          company-css
+          company-eclim
+          company-cmake
+          company-capf
+          (company-dabbrev-code company-gtags company-etags company-keywords)
+          company-oddmuse
+          company-files
+          company-dabbrev
+          company-yasnippet))
+  (setq company-backends my-company-backends)
+
+  (defun add-yas-to-company-backends (backend)
+    "Add yasnippet suggestions to the `company-mode' backend BACKEND.
+
+    Returns an alist of (BACKEND :with company-yasnippet)."
+    (if (or (eq backend 'company-yasnippet)
+            (and (listp backend) (member 'company-yasnippet backend)))
+        ;; do nothing
+        backend
+      ;; else append :with company-yasnippet
+      (append (if (consp backend) backend (list backend))
+              '(:with company-yasnippet))))
+  ;; set the backends if wanted---not right now
+  ;; (setq company-backends (mapcar #'add-yas-to-company-backends my-company-backends))
+
+  (defun my-elpy-module-company (command &rest args)
+    "Prepare company for elpy, without being too intrusive."
+    (pcase command
+      (`global-init
+       (require 'company)
+       (elpy-modules-remove-modeline-lighter 'company-mode)
+       (define-key company-active-map (kbd "C-d")
+         'company-show-doc-buffer))
+      (`buffer-init
+       (set (make-local-variable 'company-backends)
+            ;; to enable yasnippet suggestions, use the following instead:
+            ;; (cons '(elpy-company-backend :with company-yasnippet)
+            (cons '(elpy-company-backend)
+                  (mapcar #'identity ;; if want yasnippet, change here
+                          (delq 'company-semantic
+                                (delq 'company-ropemacs
+                                      (delq 'company-capf
+                                            my-company-backends))))))
+       (company-mode 1))
+      (`buffer-stop
+       (company-mode -1)
+       (kill-local-variable 'company-backends))))
+
+  (advice-add 'elpy-module-company :override #'my-elpy-module-company)
+
+  (defun check-expansion ()
+    (save-excursion
+      (if (looking-at "\\_>") t
+        (backward-char 1)
+        (if (looking-at "\\.") t
+          (backward-char 1)
+          (if (looking-at "->") t nil)))))
+
+  (defun do-yas-expand ()
+    (let ((yas-fallback-behavior 'return-nil))
+      (yas-expand)))
+
+  (defun tab-indent-or-complete ()
+    (interactive)
+    (if (minibufferp)
+        (minibuffer-complete)
+      (if (or (not yas-minor-mode) ;; xxx change this to point to right var
+              (null (when (looking-at "\\_>") (do-yas-expand))))
+          (if (check-expansion)
+              (company-complete-common)
+            (indent-for-tab-command)))))
+
+  (define-key prog-mode-map [tab] 'tab-indent-or-complete)
+  (define-key prog-mode-map (kbd "TAB") 'tab-indent-or-complete)
+
+#+END_SRC
+** Theme
+#+BEGIN_SRC emacs-lisp
+  (set-face-attribute 'company-tooltip nil
+                      :foreground (face-attribute 'font-lock-comment-face :foreground)
+                      :background (face-attribute 'fringe :background))
+  (set-face-attribute 'company-tooltip-selection nil
+                      :background "gray30"
+                      :slant 'italic
+                      :weight 'semibold)
+
+  (set-face-attribute 'company-tooltip-common nil
+                      :foreground (face-attribute 'font-lock-builtin-face :foreground))
+  (set-face-attribute 'company-tooltip-common-selection nil
+                      :foreground (face-attribute 'font-lock-builtin-face :foreground)
+                      :slant 'italic
+                      :weight 'semibold)
+
+  (set-face-attribute 'company-tooltip-annotation nil
+                      :foreground (face-attribute 'font-lock-comment-face :foreground))
+
+  (set-face-attribute 'company-scrollbar-fg nil
+                      :background (face-attribute 'font-lock-comment-face :foreground))
+  (set-face-attribute 'company-scrollbar-bg nil
+                      :background (face-attribute 'fringe :background))
+
+  (set-face-attribute 'company-preview-common nil
+                      :foreground (face-attribute 'font-lock-builtin-face :foreground)
+                      :background "SlateBlue4")
+  (set-face-attribute 'company-preview nil
+                      :foreground (face-attribute 'font-lock-builtin-face :foreground)
+                      :background "SlateBlue4")
+  (set-face-attribute 'company-preview-search nil
+                      :background "SlateBlue1")
+#+END_SRC
+* Yasnippet
+#+BEGIN_SRC emacs-lisp
+     (use-package yasnippet
+       :ensure t
+       :init
+    (yas-global-mode 1))
+#+END_SRC
+** Keybindings and popup settings
+#+BEGIN_SRC emacs-lisp
+
+  (define-key yas-minor-mode-map (kbd "<tab>") nil)
+  (define-key yas-minor-mode-map (kbd "TAB") nil)
+  (define-key yas-minor-mode-map (kbd "<backtab>") 'yas-expand)
+
+  (require 'popup)
+  (define-key popup-menu-keymap (kbd "M-n") 'popup-next)
+  (define-key popup-menu-keymap (kbd "TAB") 'popup-next)
+  (define-key popup-menu-keymap (kbd "<tab>") 'popup-next)
+  (define-key popup-menu-keymap (kbd "<backtab>") 'popup-previous)
+  (define-key popup-menu-keymap (kbd "M-p") 'popup-previous)
+  (defun yas-popup-isearch-prompt (prompt choices &optional display-fn)
+    (when (featurep 'popup)
+      (popup-menu*
+       (mapcar
+        (lambda (choice)
+          (popup-make-item
+           (or (and display-fn (funcall display-fn choice))
+               choice)
+           :value choice))
+        choices)
+       :prompt prompt
+       ;; start isearch mode immediately
+       :isearch t)))
+
+  (set-face-attribute 'popup-face nil
+                      :foreground (face-attribute 'font-lock-comment-face :foreground)
+                      :background (face-attribute 'fringe :background))
+
+  (set-face-attribute 'popup-menu-mouse-face nil
+                      :foreground (face-attribute 'font-lock-comment-face :foreground)
+                      :background (face-attribute 'fringe :background))
+
+  (set-face-attribute 'popup-menu-selection-face nil
+                      :background "gray30"
+                      :foreground (face-attribute 'font-lock-builtin-face :foreground))
+
+  (set-face-attribute 'popup-menu-summary-face nil
+                      :foreground (face-attribute 'font-lock-builtin-face :foreground))
+
+  (set-face-attribute 'popup-summary-face nil
+                      :foreground (face-attribute 'font-lock-builtin-face :foreground))
+
+  (set-face-attribute 'popup-scroll-bar-foreground-face nil
+                      :background (face-attribute 'font-lock-comment-face :foreground))
+  (set-face-attribute 'popup-scroll-bar-background-face nil
+                      :background (face-attribute 'fringe :background))
+
+  (setq yas-prompt-functions '(yas-popup-isearch-prompt yas-ido-prompt yas-no-prompt))
+#+END_SRC
+* magit
+#+BEGIN_SRC emacs-lisp
+  (use-package magit
+    :ensure t
+    :init
+    (global-set-key (kbd "C-x g") 'magit-status))
+
+  (use-package magithub-cache-file
+    :after magit
+    :config (magithub-feature-autoinject t))
+#+END_SRC
+* Writing font
+** Serif font for text
+#+BEGIN_SRC emacs-lisp
+
+  (defvar serif-preserve-default-list nil
+    "A list holding the faces that preserve the default family and
+    height when TOGGLE-SERIF is used.")
+  (setq serif-preserve-default-list
+        '(;; LaTeX markup
+          font-latex-math-face
+          font-latex-sedate-face
+          font-latex-warning-face
+          ;; org markup
+          org-latex-and-related
+          org-meta-line
+          org-verbatim
+          org-block-begin-line
+          ;; mail
+          mu4e-header-key-face
+          mu4e-header-value-face
+          mu4e-link-face
+          mu4e-contact-face
+          mu4e-compose-separator-face
+          mu4e-compose-header-face
+          message-header-name
+          message-header-to
+          message-header-cc
+          message-header-newsgroups
+          message-header-xheader
+          message-header-subject
+          message-header-other
+          ;; syntax highlighting using font-lock
+          font-lock-builtin-face
+          font-lock-comment-delimiter-face
+          font-lock-comment-face
+          font-lock-constant-face
+          font-lock-doc-face
+          font-lock-function-name-face
+          font-lock-keyword-face
+          font-lock-negation-char-face
+          font-lock-preprocessor-face
+          font-lock-regexp-grouping-backslash
+          font-lock-regexp-grouping-construct
+          font-lock-string-face
+          font-lock-type-face
+          font-lock-variable-name-face
+          font-lock-warning-face))
+
+  (defun toggle-serif (&optional show-echo)
+    "Change the default face of the current buffer to use a serif family."
+    (interactive)
+    (when (display-graphic-p)  ;; this is only for graphical emacs
+      ;; the serif font familiy and height, save the default attributes
+      (let ((serif-fam "Source Serif Pro")
+            (serif-height (round (* 1.2 (face-attribute 'default :height))))
+            (default-fam (face-attribute 'default :family))
+            (default-height (face-attribute 'default :height)))
+        (if (not (bound-and-true-p default-cookie))
+            (progn (make-local-variable 'default-cookie)
+                   (make-local-variable 'preserve-default-cookies-list)
+                   (setq preserve-default-cookies-list nil)
+                   ;; remap default face to serif
+                   (setq default-cookie
+                         (face-remap-add-relative
+                          'default :family serif-fam :height serif-height))
+                   ;; keep previously defined monospace fonts the same
+                   (dolist (face serif-preserve-default-list)
+                     (add-to-list 'preserve-default-cookies-list
+                                  (face-remap-add-relative
+                                   face :family default-fam :height default-height)))
+                   (when show-echo (message "Turned on serif writing font.")))
+          ;; else undo changes
+          (progn (face-remap-remove-relative default-cookie)
+                 (dolist (cookie preserve-default-cookies-list)
+                   (face-remap-remove-relative cookie))
+                 (setq default-cookie nil)
+                 (setq preserve-default-cookies-list nil)
+                 (when show-echo (message "Restored default fonts.")))))))
+
+#+END_SRC
+* LaTeX /AUCTeX
+** Load Packages
+#+BEGIN_SRC emacs-lisp
+
+  (load "auctex.el" nil t t)
+  (load "preview.el" nil t t)
+  (require 'texmathp)
+#+END_SRC
+** General Settings
+#+BEGIN_SRC emacs-lisp
+
+  (setq TeX-auto-save t)
+  (setq TeX-parse-self t)
+  (setq-default TeX-master nil)
+  (setq TeX-PDF-mode t)
+  (setq reftex-plug-into-AUCTeX t)
+  (setq TeX-save-query nil)
+  (setq-default TeX-command-extra-options "--shell-escape")
+  (setq TeX-error-overview-open-after-TeX-run t)
+  (setq TeX-electric-math '("$" . "$"))
+  (setq TeX-electric-sub-and-superscript t)
+  ;; fix for company completion
+  (define-key TeX-mode-map (kbd "TAB") 'tab-indent-or-complete)
+  (define-key TeX-mode-map [tab] 'tab-indent-or-complete)
+
+  (require 'font-latex)
+  (set-face-attribute 'font-latex-sectioning-5-face nil :family "CMU Bright")
+  (setq font-latex-fontify-sectioning 1.2)
+  (font-latex-update-sectioning-faces)
+
+  (setq-default LaTeX-fill-break-at-separators (quote (\\\( \\\[ \\\])))
+#+END_SRC
+** SyncTeX, Hooks, Latexmk, XeLaTeX, SpellChecking
+#+BEGIN_SRC emacs-lisp
+
+  (setq TeX-source-correlate-method 'synctex)
+  (setq TeX-source-correlate-start-server t)
+  (add-hook 'LaTeX-mode-hook 'TeX-source-correlate-mode)
+
+  (add-hook 'LaTeX-mode-hook 'visual-line-mode)
+  (add-hook 'LaTeX-mode-hook 'flyspell-mode)
+  (add-hook 'LaTeX-mode-hook 'LaTeX-math-mode)
+  (add-hook 'LaTeX-mode-hook 'turn-on-reftex)
+
+  (require 'auctex-latexmk)
+  (auctex-latexmk-setup)
+
+  (add-to-list 'TeX-command-list '("XeLaTeX" "%`xelatex %(extraopts)%(mode)%' %t" TeX-run-TeX nil t))
+
+
+  (require 'ispell)
+  (setq-default ispell-program-name "hunspell")
+  (setq ispell-really-hunspell t)
+
+  (setq ispell-dictionary-base-alist
+        '(("en_GB"
+           "[a-zA-Z]" "[^a-zA-Z]" "[']" nil
+           ("-d" "en_GB" "-i" "iso-8859-1") nil iso-8859-1)
+          ("de_DE"
+           "[a-zäöüßA-ZÄÖÜ]" "[^a-zäöüßA-ZÄÖÜ]" "[']" nil
+           ("-d" "de_DE" "-i" "iso-8859-1") nil iso-8859-1)))
+
+  (eval-after-load "ispell"
+    (progn
+      (setq ispell-dictionary "en_GB")
+      (setq ispell-silently-savep t))) ; save personal dict without confirmation
+#+END_SRC
+* Elfeed
+#+BEGIN_SRC emacs-lisp
+
+  (setq elfeed-db-directory "~/Documents/shared/elfeeddb")
+
+  (defun elfeed-mark-all-as-read ()
+    (interactive)
+    (mark-whole-buffer)
+    (elfeed-search-untag-all-unread))
+
+  (use-package elfeed-goodies
+    :ensure t
+    :config
+    (elfeed-goodies/setup))
+
+
+  (use-package elfeed-org
+    :ensure t
+    :config
+    (elfeed-org)
+    (setq rmh-elfeed-org-files (list "~/Documents/shared/elfeed.org")))
+
+
+  ;; elfeed feed reader                                                     ;;
+  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+  ;;shortcut functions
+  (defun bjm/elfeed-show-all ()
+    (interactive)
+    (bookmark-maybe-load-default-file)
+    (bookmark-jump "elfeed-all"))
+  (defun bjm/elfeed-show-emacs ()
+    (interactive)
+    (bookmark-maybe-load-default-file)
+    (bookmark-jump "elfeed-emacs"))
+  (defun bjm/elfeed-show-daily ()
+    (interactive)
+    (bookmark-maybe-load-default-file)
+    (bookmark-jump "elfeed-daily"))
+  (defun bjm/elfeed-show-web ()
+    (interactive)
+    (bookmark-maybe-load-default-file)
+    (bookmark-jump "elfeed-web"))
+  ;;functions to support syncing .elfeed between machines
+  ;;makes sure elfeed reads index from disk before launching
+  (defun bjm/elfeed-load-db-and-open ()
+    "Wrapper to load the elfeed db from disk before opening"
+    (interactive)
+    (elfeed-db-load)
+    (elfeed)
+    (elfeed-search-update--force))
+
+  ;;write to disk when quiting
+  (defun bjm/elfeed-save-db-and-bury ()
+    "Wrapper to save the elfeed db to disk before burying buffer"
+    (interactive)
+    (elfeed-db-save)
+    (quit-window))
+
+  (use-package elfeed
+    :ensure t
+    :config
+    (global-set-key (kbd "C-x w") 'elfeed)
+    :bind (:map elfeed-search-mode-map
+                ("A" . bjm/elfeed-show-all)
+                ("E" . bjm/elfeed-show-emacs)
+                ("D" . bjm/elfeed-show-daily)
+                ("W" . bjm/elfeed-show-web)
+                ("q" . bjm/elfeed-save-db-and-bury)))
+#+END_SRC
+* MarkDown mode and Pdf Tools
+#+BEGIN_SRC emacs-lisp
+
+  (use-package markdown-mode
+    :ensure t
+    :commands (markdown-mode gfm-mode)
+    :mode (("README\\.md\\'" . gfm-mode)
+           ("\\.md\\'" . markdown-mode)
+           ("\\.markdown\\'" . markdown-mode))
+    :init (setq markdown-command "multimarkdown"))
+
+  (use-package pdf-tools
+    :ensure t)
+#+END_SRC
+* Javascript
+#+BEGIN_SRC emacs-lisp
+
+  (use-package js2-mode
+    :ensure t
+    :init
+    (progn
+      (add-hook 'js-mode-hook 'js2-minor-mode)
+      ))
+
+  (use-package js2-refactor
+    :ensure t
+    :config
+    (progn
+      (js2r-add-keybindings-with-prefix "C-c C-m")
+      (add-hook 'js2-mode #'js2-refactor-mode)))
+
+  (use-package tern
+    :ensure tern
+    :config
+    (progn
+      (add-hook 'js-mode-hook (lambda () (tern-mode t)))
+      (add-hook 'js2-mode-hook (lambda () (tern-mode t)))
+      (add-to-list 'auto-mode-alist '("\\.js\\'" . js2-mode))))
+
+  (use-package nodejs-repl
+    :ensure t)
+
+  (add-hook 'js-mode-hook
+            (lambda ()
+              (define-key js-mode-map (kbd "C-x C-e") 'nodejs-repl-send-last-sexp)
+              (define-key js-mode-map (kbd "C-c C-r") 'nodejs-repl-send-region)
+              (define-key js-mode-map (kbd "C-c C-l") 'nodejs-repl-load-file)
+              (define-key js-mode-map (kbd "C-c C-z") 'nodejs-repl-switch-to-repl)))
+
+  (use-package json-mode
+    :ensure t)
+#+END_SRC
+* NeoTree
+#+BEGIN_SRC emacs-lisp
+  (use-package neotree
+    :ensure t
+    :config
+    (global-set-key [f8] 'neotree-toggle))
+#+END_SRC
+* Web packages
+#+BEGIN_SRC emacs-lisp
+
+  (use-package web-mode
+    :ensure t
+    :config
+    (add-to-list 'auto-mode-alist '("\\.html?\\'" . web-mode))
+    (add-to-list 'auto-mode-alist '("\\.html\\.erb\\'" . web-mode))
+    (add-to-list 'auto-mode-alist '("\\.mustache\\'" . web-mode))
+    (add-to-list 'auto-mode-alist '("\\.jinja\\'" . web-mode))
+    (add-to-list 'auto-mode-alist '("\\.php\\'" . web-mode))
+    (add-to-list 'auto-mode-alist '("\\.tsx\\'" . web-mode))
+    (setq web-mode-markup-indent-offset 2)
+    (setq web-mode-css-indent-offset 2)
+    (setq web-mode-code-indent-offset 2)
+    (setq web-mode-engines-alist
+          '(("django"   . "\\.html\\'")))
+    (setq web-mode-enable-auto-closing t))
+
+  (use-package tide
+    :ensure t
+    :config
+    (defun setup-tide-mode ()
+      (interactive)
+      (tide-setup)
+      (flycheck-mode +1)
+      (setq flycheck-check-syntax-automatically '(save mode-enabled))
+      (eldoc-mode +1)
+      (tide-hl-identifier-mode +1)
+      (company-mode +1)))
+
+  (use-package php-mode
+    :ensure t)
+
+  (use-package go-mode
+    :ensure t)
+
+  (use-package emmet-mode
+    :ensure t
+    :config
+    (add-hook 'sqml-mode-hook 'emmet-mode)
+    (add-hook 'web-mode-hook 'emmet-mode)
+    (add-hook 'css-mode-hook 'emmet-mode)
+  )
+#+END_SRC
+* Misc packages
+** ivy
+#+BEGIN_SRC emacs-lisp
+  (use-package ace-window
+    :ensure t
+    :init
+    (progn
+      (global-set-key [remap other-window] 'ace-window)
+      ))
+
+  (use-package counsel
+    :ensure t
+    )
+
+  (use-package ivy
+    :ensure t
+    :diminish (ivy-mode)
+    :bind(("C-x b" . ivy-switch-buffer))
+    :config
+    (ivy-mode 1)
+    (setq ivy-use-virtual-buffers t)
+    (setq ivy-display-style 'fancy))
+
+  (use-package swiper
+    :ensure t
+    :bind (("C-s" . swiper)
+           ("C-r" . swiper)
+           ("C-c C-r" . ivy-resume)
+           ("M-x" . counsel-M-x)
+           ("C-x C-f" . counsel-find-file))
+    :config
+    (progn
+      (ivy-mode 1)
+      (setq ivy-use-virtual-buffers t)
+      (setq ivy-display-style 'fancy)
+      (setq enable-recursive-minibuffers t)
+      (define-key read-expression-map (kbd "C-r") 'counsel-expression-history)
+      ))
+#+END_SRC
+* Projectile and Dumb-jump
+#+BEGIN_SRC emacs-lisp
+
+  (use-package projectile
+    :ensure t
+    :config
+    (projectile-global-mode)
+  (setq projectile-completion-system 'ivy))
+
+  (use-package counsel-projectile
+    :ensure t
+    :config
+    (counsel-projectile-on))
+
+  (use-package dumb-jump
+    :bind (("M-g o" . dumb-jump-go-other-window)
+           ("M-g j" . dumb-jump-go)
+           ("M-g x" . dumb-jump-go-prefered-external)
+           ("M-g z" . dumb-jump-go-external-other-window))
+    :config (setq dumb-jump-selector 'ivy)
+    :init
+    (dumb-jump-mode)
+    :ensure)
+#+END_SRC
+* Evil mode
+#+BEGIN_SRC emacs-lisp
+
+  (use-package evil
+    :init
+    (progn
+      ;; if we don't have this evil overwrites the cursor color
+      (setq evil-default-cursor t)
+
+      ;; leader shortcuts
+
+      ;; This has to be before we invoke evil-mode due to:
+      ;; https://github.com/cofi/evil-leader/issues/10
+      (use-package evil-leader
+        :init (global-evil-leader-mode t)
+        :config
+        (progn
+          (setq evil-leader/in-all-states t)
+          ;; keyboard shortcuts
+          (evil-leader/set-key
+            "a" 'ag-project
+            "A" 'ag
+            "b" 'ido-switch-buffer
+            "c" 'mc/mark-next-like-this
+            "C" 'mc/mark-all-like-this
+            "e" 'er/expand-region
+            "E" 'mc/edit-lines
+            "f" 'ido-find-file
+            "g" 'magit-status
+            "i" 'idomenu
+            "j" 'ace-jump-mode
+            "k" 'kill-buffer
+            "K" 'kill-this-buffer
+            "o" 'occur
+            "p" 'magit-find-file-completing-read
+            "r" 'recentf-ido-find-file
+            "s" 'ag-project
+            "t" 'bw-open-term
+            "T" 'eshell
+            "w" 'save-buffer
+            "x" 'smex
+            "li" 'evilnc-comment-or-uncomment-lines
+            "ll" 'evilnc-quick-comment-or-uncomment-to-the-line
+            "ll" 'evilnc-quick-comment-or-uncomment-to-the-line
+            "lc" 'evilnc-copy-and-comment-lines
+            "lp" 'evilnc-comment-or-uncomment-paragraphs
+            "lr" 'comment-or-uncomment-region
+            "lv" 'evilnc-toggle-invert-comment-line-by-line
+            "."  'evilnc-copy-and-comment-operator
+            "\\" 'evilnc-comment-operator ; if you prefer backslash key
+            )))
+
+      ;; boot evil by default
+      (evil-mode 1))
+    :config
+    (progn
+      ;; use ido to open files
+      (define-key evil-ex-map "e " 'ido-find-file)
+      (define-key evil-ex-map "b " 'ido-switch-buffer)
+
+      (setq
+       ;; h/l wrap around to next lines
+       evil-cross-lines t)
+
+      ;; esc should always quit: http://stackoverflow.com/a/10166400/61435
+      (define-key evil-normal-state-map [escape] 'keyboard-quit)
+      (define-key evil-visual-state-map [escape] 'keyboard-quit)
+      (define-key minibuffer-local-map [escape] 'abort-recursive-edit)
+      (define-key minibuffer-local-ns-map [escape] 'abort-recursive-edit)
+      (define-key minibuffer-local-completion-map [escape] 'abort-recursive-edit)
+      (define-key minibuffer-local-must-match-map [escape] 'abort-recursive-edit)
+      (define-key minibuffer-local-isearch-map [escape] 'abort-recursive-edit)
+
+      ;; modes to map to different default states
+      (evil-set-initial-state 'calendar-mode 'emacs)
+      (evil-set-initial-state 'org-mode 'emacs)
+      (evil-set-initial-state 'elfeed-search 'emacs)))
+#+END_SRC
