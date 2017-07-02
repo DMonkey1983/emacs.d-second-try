@@ -8,3 +8,7 @@
 /elpa/
 /emacs_backup/  
 /README.odt
+/README.org
+/eshell/history
+/eshell/lastdir
+/recentf
