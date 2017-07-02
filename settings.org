@@ -1428,6 +1428,9 @@ Remove the strange white line between fringes
       (add-hook 'js-mode-hook 'js2-minor-mode)
       ))
 
+  (use-package rjsx-mode
+    :ensure t)
+
   (use-package js2-refactor
     :ensure t
     :config
