@@ -26,13 +26,17 @@
 ** Appearance
 *** Theme & Faces
 #+BEGIN_SRC  emacs-lisp
-  (load-theme 'wheatgrass)
-;;  (set-face-attribute 'default nil : height 94)
-;;  (set-face-attribute 'fringe nil : background "#2d2d2d")
-;;  (set-face-attribute 'default nil : family "Source Code Pro")
-;;  (set-face-attribute 'font-lock-comment-face nil :slant 'italic)
-;;  (set-face-attribute 'font-lock-comment-face nil :weight 'semibold)
-;;  (set-fontset-font "fontset-default" 'unicode "DejaVu Sans Mono for Powerline")
+  (use-package zenburn-theme
+    :ensure t
+    )
+
+  (load-theme 'zenburn t)
+  ;;  (set-face-attribute 'default nil : height 94)
+  ;;  (set-face-attribute 'fringe nil : background "#2d2d2d")
+  ;;  (set-face-attribute 'default nil : family "Source Code Pro")
+  ;;  (set-face-attribute 'font-lock-comment-face nil :slant 'italic)
+  ;;  (set-face-attribute 'font-lock-comment-face nil :weight 'semibold)
+  ;;  (set-fontset-font "fontset-default" 'unicode "DejaVu Sans Mono for Powerline")
 #+END_SRC
 *** UI Elements
     Get rid of all those fancy UI elements that we don't need.
@@ -709,6 +713,7 @@ Remove the strange white line between fringes
 #+BEGIN_SRC emacs-lisp
 
   (require 'org)
+  (require 'ox-md)
   (setq-default
    org-return-follows-link t
    org-image-actual-width '(400)
@@ -1470,12 +1475,25 @@ Remove the strange white line between fringes
     (add-to-list 'auto-mode-alist '("\\.jinja\\'" . web-mode))
     (add-to-list 'auto-mode-alist '("\\.php\\'" . web-mode))
     (add-to-list 'auto-mode-alist '("\\.tsx\\'" . web-mode))
-    (setq web-mode-markup-indent-offset 2)
-    (setq web-mode-css-indent-offset 2)
-    (setq web-mode-code-indent-offset 2)
     (setq web-mode-engines-alist
           '(("django"   . "\\.html\\'")))
     (setq web-mode-enable-auto-closing t))
+
+  (defun my-setup-indent (n)
+    ;; java/c/c++
+    (setq c-basic-offset n)
+    ;; web development
+    (setq coffee-tab-width n) ; coffeescript
+    (setq javascript-indent-level n) ; javascript-mode
+    (setq js-indent-level n) ; js-mode
+    (setq js2-basic-offset n) ; js2-mode, in latest js2-mode, it's alias of js-indent-level
+    (setq web-mode-markup-indent-offset n) ; web-mode, html tag in html file
+    (setq web-mode-css-indent-offset n) ; web-mode, css in html file
+    (setq web-mode-code-indent-offset n) ; web-mode, js code in html file
+    (setq css-indent-offset n) ; css-mode
+    )
+
+  (my-setup-indent 2) ; indent 2 spaces width
 
   (use-package tide
     :ensure t
