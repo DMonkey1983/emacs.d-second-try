@@ -1,0 +1,9 @@
+*.el
+/projectile-bookmarks.eld
+/autosave/
+/*.signed
+*.signed
+/*.elc
+/*.elc
+/elpa/
+/emacs_backup/  
