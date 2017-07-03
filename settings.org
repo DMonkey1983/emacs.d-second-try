@@ -708,6 +708,108 @@ Remove the strange white line between fringes
 
   (defalias 'sh 'ansi-term)
 #+END_SRC
+* Shell and EShell
+** eshell
+#+BEGIN_SRC emacs-lisp
+  (require 'eshell)
+  (defun my-eshell-hook ()
+    (eshell-read-aliases-list)
+    (setq global-hl-line-mode nil)
+    (setq show-trailing-whitespace nil)
+    (setq-local ml-interactive? t)
+    (eshell/addpath "~/bin"))
+  (add-hook 'eshell-mode-hook 'me-eshell-hook)
+
+  (add-hook 'eshell-mode-hook
+     (lambda ()
+       (add-to-list 'eshell-visual-commands "ssh")
+       (add-to-list 'eshell-visual-commands "htop")
+       (add-to-list 'eshell-visual-commands "ncmpcpp")
+       (add-to-list 'eshell-visual-commands "tail")))
+
+  (setq eshell-banner-message "")
+
+  (defun eshell/clear ()
+    "Deletes the contents of eshell buffer, except the last prompt"
+    (save-excursion
+      (goto-char eshell-last-output-end)
+      (let ((lines (count-lines 1 (point)))
+            (inhibit-read-only t))
+        (beginning-of-line)
+        (let ((pos (point)))
+          (if (bobp)
+              (if (interactive-p)
+                  (error "Buffer too short to truncate"))
+            (delete-region (point-min) (point)))))))
+
+  (defun pwd-replace-home (pwd)
+    "Replace home in PWD with tilde (~) character."
+    (interactive)
+    (let* ((home (expand-file-name (getenv "HOME")))
+           (home-len (length home)))
+      (if (and
+           (>= (length pwd) home-len)
+           (equal home (substring pwd 0 home-len)))
+          (concat "~" (substring pwd home-len))
+        pwd)))
+
+  ;; a macro to propertize, stolen from emacswiki.
+  (defmacro with-face (str &rest properties)
+    `(propertize ,str 'face (list ,@properties)))
+  ;; the prompt function
+  (defun dennis-eshell-prompt ()
+    (let*
+        ;; need some string lengths to fill the screen with spaces
+        ((spc-cnt (length hostname))
+         (dir (pwd-replace-home (eshell/pwd)))
+         (offset (if (display-graphic-p)
+                     2 3)) ;; need extra offset in terminal
+         (fill-size (- (window-body-width) (+ spc-cnt (length dir) offset))))
+      ;; put together the prompt
+      (concat
+       "\n"
+       (with-face hostname :foreground "cornflower blue" :weight "bold")
+       (with-face "|" :foreground "red" :weight "bold")
+       (with-face dir :foreground "gold" :weight "extra-bold")
+       (make-string fill-size 32) ;; go to the right side
+       ;; the return status indicator
+       (if (equal eshell-last-command-status 0)
+           (with-face (char-to-string #x2713) :foreground "green" :weight "bold")
+         (with-face (char-to-string #x2717) :foreground "red" :weight "bold"))
+       "\n"
+       (make-string spc-cnt 32)
+       (with-face "|" :foreground "red" :weight "bold")
+       (with-face (char-to-string #x25b8) :foreground (face-attribute 'default :foreground))
+       " ")))
+  ;; set the prompt regexp for eshell to recognize what is prompt and what not.
+  (setq
+   eshell-prompt-function 'dennis-eshell-prompt
+   eshell-prompt-regexp (concat "\s*|" (char-to-string #x25b8) " ")) ;; \s* captures whitespace
+
+
+#+END_SRC
+** shell
+#+BEGIN_SRC emacs-lisp
+
+  (setq explicit-shell-file-name "/bin/zsh")
+  (add-hook 'shell-mode-hook 'no-trailing-whitespace)
+  (add-hook 'shell-mode-hook '(lambda () (setq-local ml-interactive? t)))
+
+  (setq scheme-program-name "guile")
+  (add-hook 'inferior-scheme-mode-hook 'no-trailing-whitespace)
+  (add-hook 'inferior-scheme-mode-hook '(lambda () (setq-local ml-interactive? t)))
+  ;; geiser
+  (setq geiser-repl-use-other-window nil)
+  (setq geiser-active-implementations '(guile))
+  (add-hook 'geiser-repl-mode-hook 'no-trailing-whitespace)
+  (add-hook 'geiser-repl-mode-hook 'turn-on-paredit)
+  (add-hook 'geiser-repl-mode-hook '(lambda () (setq-local ml-interactive? t)))
+  ;; scheme-mode
+  (add-hook 'scheme-mode-hook 'turn-on-paredit)
+  (add-hook 'scheme-mode-hook 'turn-on-geiser-mode)
+
+
+#+END_SRC
 * Org Mode
 ** General Settings
 #+BEGIN_SRC emacs-lisp
@@ -1562,6 +1664,16 @@ Remove the strange white line between fringes
       (setq enable-recursive-minibuffers t)
       (define-key read-expression-map (kbd "C-r") 'counsel-expression-history)
       ))
+#+END_SRC
+** Delete Trailing whitespace
+#+BEGIN_SRC emacs-lisp
+  (add-hook 'before-save-hook 'delete-trailing-whitespace)
+#+END_SRC
+** Multiple Cursors
+#+BEGIN_SRC emacs-lisp
+  (use-package multiple-cursors
+    :ensure t
+    :defer  1)
 #+END_SRC
 * Projectile and Dumb-jump
 #+BEGIN_SRC emacs-lisp
