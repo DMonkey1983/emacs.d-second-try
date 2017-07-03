@@ -64,7 +64,7 @@ Remove the strange white line between fringes
 	scroll-conservatively 10000)
 #+END_SRC
 * Autosave and BackupFiles
-#+BEGIN_SRC emacs-lisp 
+#+BEGIN_SRC emacs-lisp
   (defvar backup-dir (expand-file-name "~/.emacs.d/emacs_backup/"))
   (defvar autosave-dir (expand-file-name "~/.emacs.d/autosave/"))
   (setq backup-directory-alist (list (cons ".*" backup-dir)))
@@ -73,26 +73,176 @@ Remove the strange white line between fringes
   (setq tramp-backup-directory-alist backup-directory-alist)
   (setq tramp-auto-save-directory autosave-dir)
 #+END_SRC
-* Trailing white space
+* Cursor
 #+BEGIN_SRC emacs-lisp
-  (require 'whitespace)
-  (setq-default show-trailing-whitespace t)
-#+END_SRC
-** Don't show trailing whitespace in some modes
-#+BEGIN_SRC emacs-lisp
-  (defun no-trailing-whitespace ()
-    (setq show-trailing-whitespace nil))
 
-  (add-hook 'minibuffer-setup-hook
-	    'no-trailing-whitespace)
-  (add-hook 'eww-mode-hook
-	    'no-trailing-whitespace)
-  (add-hook 'ielm-mode-hook
-	    'no-trailing-whitespace)
-  (add-hook 'gdb-mode-hook
-	    'no-trailing-whitespace)
-  (add-hook 'help-mode-hook
-	    'no-trailing-whitespace)
+  (defun dennis-set-cursor ()
+    (set-cursor-color "gold") ;; set cursor color to gold
+    (set-face-attribute 'region nil :background "gold" :foreground "black")
+    (set-face-background 'highlight "gray30")
+    (set-face-foreground 'highlight nil)
+    (set-face-underline 'highlight nil)
+    (cond
+     (buffer-read-only
+      (setq cursor-type 'box))
+     (t
+      (setq cursor-type 'bar)))
+    ;; red cursor for overwrite mode
+    (when overwrite-mode
+      (set-cursor-color "red")))
+  (dennis-set-cursor)
+
+#+END_SRC
+* Company
+#+BEGIN_SRC emacs-lisp
+
+  (require 'company)
+  (setq company-tooltip-align-annotations t)
+  (setq company-selection-wrap-around t)
+  (setq company-tooltip-flip-when-above t)
+  (setq company-idle-delay 0.0)
+  (add-hook 'after-init-hook 'global-company-mode)
+
+  (require 'company-dabbrev)
+  (require 'company-dabbrev-code)
+  (setq company-dabbrev-code-everywhere t)
+  (setq company-dabbrev-code-ignore-case nil)
+  (setq company-dabbrev-ignore-case nil)
+  (add-to-list 'company-dabbrev-code-modes 'julia-mode)
+  (add-to-list 'company-dabbrev-code-modes 'matlab-mode)
+  (add-to-list 'company-dabbrev-code-modes 'matlab-shell-mode)
+
+  (define-key company-active-map [tab] 'company-complete-common-or-cycle)
+  (define-key company-active-map (kbd "TAB") 'company-complete-common-or-cycle)
+
+  (require 'company-auctex)
+  (require 'company-math)
+  (require 'company-c-headers)
+  (add-to-list 'company-c-headers-path-system "/usr/include/c++/7.1.1/")
+
+  (defvar my-company-backends nil
+    "A list of my company backends")
+  (setq my-company-backends
+        '(company-auctex-labels
+          company-auctex-bibs
+          (company-auctex-macros company-auctex-symbols company-auctex-environments)
+          (company-math-symbols-latex company-math-symbols-unicode)
+          company-ispell
+          (company-semantic
+           company-clang company-c-headers)
+          company-bbdb
+          company-elisp
+          ac-js2-company
+          company-nxml
+          company-css
+          company-eclim
+          company-cmake
+          company-capf
+          (company-dabbrev-code company-gtags company-etags company-keywords)
+          company-oddmuse
+          company-files
+          company-dabbrev
+          company-yasnippet))
+  (setq company-backends my-company-backends)
+
+  (defun add-yas-to-company-backends (backend)
+    "Add yasnippet suggestions to the `company-mode' backend BACKEND.
+
+    Returns an alist of (BACKEND :with company-yasnippet)."
+    (if (or (eq backend 'company-yasnippet)
+            (and (listp backend) (member 'company-yasnippet backend)))
+        ;; do nothing
+        backend
+      ;; else append :with company-yasnippet
+      (append (if (consp backend) backend (list backend))
+              '(:with company-yasnippet))))
+  ;; set the backends if wanted---not right now
+  ;; (setq company-backends (mapcar #'add-yas-to-company-backends my-company-backends))
+
+  (defun my-elpy-module-company (command &rest args)
+    "Prepare company for elpy, without being too intrusive."
+    (pcase command
+      (`global-init
+       (require 'company)
+       (elpy-modules-remove-modeline-lighter 'company-mode)
+       (define-key company-active-map (kbd "C-d")
+         'company-show-doc-buffer))
+      (`buffer-init
+       (set (make-local-variable 'company-backends)
+            ;; to enable yasnippet suggestions, use the following instead:
+            ;; (cons '(elpy-company-backend :with company-yasnippet)
+            (cons '(elpy-company-backend)
+                  (mapcar #'identity ;; if want yasnippet, change here
+                          (delq 'company-semantic
+                                (delq 'company-ropemacs
+                                      (delq 'company-capf
+                                            my-company-backends))))))
+       (company-mode 1))
+      (`buffer-stop
+       (company-mode -1)
+       (kill-local-variable 'company-backends))))
+
+  (advice-add 'elpy-module-company :override #'my-elpy-module-company)
+
+  (defun check-expansion ()
+    (save-excursion
+      (if (looking-at "\\_>") t
+        (backward-char 1)
+        (if (looking-at "\\.") t
+          (backward-char 1)
+          (if (looking-at "->") t nil)))))
+
+  (defun do-yas-expand ()
+    (let ((yas-fallback-behavior 'return-nil))
+      (yas-expand)))
+
+  (defun tab-indent-or-complete ()
+    (interactive)
+    (if (minibufferp)
+        (minibuffer-complete)
+      (if (or (not yas-minor-mode) ;; xxx change this to point to right var
+              (null (when (looking-at "\\_>") (do-yas-expand))))
+          (if (check-expansion)
+              (company-complete-common)
+            (indent-for-tab-command)))))
+
+  (define-key prog-mode-map [tab] 'tab-indent-or-complete)
+  (define-key prog-mode-map (kbd "TAB") 'tab-indent-or-complete)
+
+#+END_SRC
+** Theme
+#+BEGIN_SRC emacs-lisp
+  (set-face-attribute 'company-tooltip nil
+                      :foreground (face-attribute 'font-lock-comment-face :foreground)
+                      :background (face-attribute 'fringe :background))
+  (set-face-attribute 'company-tooltip-selection nil
+                      :background "gray30"
+                      :slant 'italic
+                      :weight 'semibold)
+
+  (set-face-attribute 'company-tooltip-common nil
+                      :foreground (face-attribute 'font-lock-builtin-face :foreground))
+  (set-face-attribute 'company-tooltip-common-selection nil
+                      :foreground (face-attribute 'font-lock-builtin-face :foreground)
+                      :slant 'italic
+                      :weight 'semibold)
+
+  (set-face-attribute 'company-tooltip-annotation nil
+                      :foreground (face-attribute 'font-lock-comment-face :foreground))
+
+  (set-face-attribute 'company-scrollbar-fg nil
+                      :background (face-attribute 'font-lock-comment-face :foreground))
+  (set-face-attribute 'company-scrollbar-bg nil
+                      :background (face-attribute 'fringe :background))
+
+  (set-face-attribute 'company-preview-common nil
+                      :foreground (face-attribute 'font-lock-builtin-face :foreground)
+                      :background "SlateBlue4")
+  (set-face-attribute 'company-preview nil
+                      :foreground (face-attribute 'font-lock-builtin-face :foreground)
+                      :background "SlateBlue4")
+  (set-face-attribute 'company-preview-search nil
+                      :background "SlateBlue1")
 #+END_SRC
 * Dired
 ** General Settings
@@ -517,82 +667,152 @@ Remove the strange white line between fringes
 		(powerline-render rhs))))))
 
 #+END_SRC
-* Cursor
+* Elfeed
 #+BEGIN_SRC emacs-lisp
 
-  (defun dennis-set-cursor ()
-    (set-cursor-color "gold") ;; set cursor color to gold
-    (set-face-attribute 'region nil :background "gold" :foreground "black")
-    (set-face-background 'highlight "gray30")
-    (set-face-foreground 'highlight nil)
-    (set-face-underline 'highlight nil)
-    (cond
-     (buffer-read-only
-      (setq cursor-type 'box))
-     (t
-      (setq cursor-type 'bar)))
-    ;; red cursor for overwrite mode
-    (when overwrite-mode
-      (set-cursor-color "red")))
-  (dennis-set-cursor)
+  (setq elfeed-db-directory "~/Documents/shared/elfeeddb")
 
+  (defun elfeed-mark-all-as-read ()
+    (interactive)
+    (mark-whole-buffer)
+    (elfeed-search-untag-all-unread))
+
+  (use-package elfeed-goodies
+    :ensure t
+    :config
+    (elfeed-goodies/setup))
+
+
+  (use-package elfeed-org
+    :ensure t
+    :config
+    (elfeed-org)
+    (setq rmh-elfeed-org-files (list "~/Documents/shared/elfeed.org")))
+
+
+  ;; elfeed feed reader                                                     ;;
+  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+  ;;shortcut functions
+  (defun bjm/elfeed-show-all ()
+    (interactive)
+    (bookmark-maybe-load-default-file)
+    (bookmark-jump "elfeed-all"))
+  (defun bjm/elfeed-show-emacs ()
+    (interactive)
+    (bookmark-maybe-load-default-file)
+    (bookmark-jump "elfeed-emacs"))
+  (defun bjm/elfeed-show-daily ()
+    (interactive)
+    (bookmark-maybe-load-default-file)
+    (bookmark-jump "elfeed-daily"))
+  (defun bjm/elfeed-show-web ()
+    (interactive)
+    (bookmark-maybe-load-default-file)
+    (bookmark-jump "elfeed-web"))
+  ;;functions to support syncing .elfeed between machines
+  ;;makes sure elfeed reads index from disk before launching
+  (defun bjm/elfeed-load-db-and-open ()
+    "Wrapper to load the elfeed db from disk before opening"
+    (interactive)
+    (elfeed-db-load)
+    (elfeed)
+    (elfeed-search-update--force))
+
+  ;;write to disk when quiting
+  (defun bjm/elfeed-save-db-and-bury ()
+    "Wrapper to save the elfeed db to disk before burying buffer"
+    (interactive)
+    (elfeed-db-save)
+    (quit-window))
+
+  (use-package elfeed
+    :ensure t
+    :config
+    (global-set-key (kbd "C-x w") 'elfeed)
+    :bind (:map elfeed-search-mode-map
+                ("A" . bjm/elfeed-show-all)
+                ("E" . bjm/elfeed-show-emacs)
+                ("D" . bjm/elfeed-show-daily)
+                ("W" . bjm/elfeed-show-web)
+                ("q" . bjm/elfeed-save-db-and-bury)))
 #+END_SRC
-
-* Spaces and Tabs
+* Evil mode
 #+BEGIN_SRC emacs-lisp
-  (setq-default indent-tabs-mode nil)
-  (setq-default tab-width 2)
-  (setq-default tab-stop-list (number-sequence 2 120 2))
-  (setq c-basic-indent 2)
-  (setq sh-basic-offset 2)
 
-  (defun my-tabs-makefile-hook ()
-    (setq indent-tabs-mode t))
-  (add-hook 'makefile-mode-hook 'my-tabs-makefile-hook)
-#+END_SRC
+  (use-package evil
+    :init
+    (progn
+      ;; if we don't have this evil overwrites the cursor color
+      (setq evil-default-cursor t)
 
-* Parentheses
-#+BEGIN_SRC emacs-lisp
-(require 'highlight-parentheses)
-  (show-paren-mode 1)
-  (setq show-paren-delay 0)
+      ;; leader shortcuts
 
-  (define-globalized-minor-mode global-highlight-parentheses-mode
-    highlight-parentheses-mode
-    (lambda ()
-      (highlight-parentheses-mode t)))
-  (global-highlight-parentheses-mode t)
+      ;; This has to be before we invoke evil-mode due to:
+      ;; https://github.com/cofi/evil-leader/issues/10
+      (use-package evil-leader
+        :init (global-evil-leader-mode t)
+        :config
+        (progn
+          (setq evil-leader/in-all-states t)
+          ;; keyboard shortcuts
+          (evil-leader/set-key
+            "a" 'ag-project
+            "A" 'ag
+            "b" 'ido-switch-buffer
+            "c" 'mc/mark-next-like-this
+            "C" 'mc/mark-all-like-this
+            "e" 'er/expand-region
+            "E" 'mc/edit-lines
+            "f" 'ido-find-file
+            "g" 'magit-status
+            "i" 'idomenu
+            "j" 'ace-jump-mode
+            "k" 'kill-buffer
+            "K" 'kill-this-buffer
+            "o" 'occur
+            "p" 'magit-find-file-completing-read
+            "r" 'recentf-ido-find-file
+            "s" 'ag-project
+            "t" 'bw-open-term
+            "T" 'eshell
+            "w" 'save-buffer
+            "x" 'smex
+            "li" 'evilnc-comment-or-uncomment-lines
+            "ll" 'evilnc-quick-comment-or-uncomment-to-the-line
+            "ll" 'evilnc-quick-comment-or-uncomment-to-the-line
+            "lc" 'evilnc-copy-and-comment-lines
+            "lp" 'evilnc-comment-or-uncomment-paragraphs
+            "lr" 'comment-or-uncomment-region
+            "lv" 'evilnc-toggle-invert-comment-line-by-line
+            "."  'evilnc-copy-and-comment-operator
+            "\\" 'evilnc-comment-operator ; if you prefer backslash key
+            )))
 
-  (require 'rainbow-delimiters)
+      ;; boot evil by default
+      (evil-mode 1))
+    :config
+    (progn
+      ;; use ido to open files
+      (define-key evil-ex-map "e " 'ido-find-file)
+      (define-key evil-ex-map "b " 'ido-switch-buffer)
 
-  (set-face-attribute 'rainbow-delimiters-depth-1-face nil
-		      :foreground "#78c5d6")
-  (set-face-attribute 'rainbow-delimiters-depth-2-face nil
-		      :foreground "#bf62a6")
-  (set-face-attribute 'rainbow-delimiters-depth-3-face nil
-		      :foreground "#459ba8")
-  (set-face-attribute 'rainbow-delimiters-depth-4-face nil
-		      :foreground "#e868a2")
-  (set-face-attribute 'rainbow-delimiters-depth-5-face nil
-		      :foreground "#79c267")
-  (set-face-attribute 'rainbow-delimiters-depth-6-face nil
-		      :foreground "#f28c33")
-  (set-face-attribute 'rainbow-delimiters-depth-7-face nil
-		      :foreground "#c5d647")
-  (set-face-attribute 'rainbow-delimiters-depth-8-face nil
-		      :foreground "#f5d63d")
-  (set-face-attribute 'rainbow-delimiters-depth-9-face nil
-		      :foreground "#78c5d6")
+      (setq
+       ;; h/l wrap around to next lines
+       evil-cross-lines t)
 
-  (set-face-attribute 'rainbow-delimiters-unmatched-face nil
-		      :foreground 'unspecified
-		      :inherit 'show-paren-mismatch
-		      :strike-through t)
+      ;; esc should always quit: http://stackoverflow.com/a/10166400/61435
+      (define-key evil-normal-state-map [escape] 'keyboard-quit)
+      (define-key evil-visual-state-map [escape] 'keyboard-quit)
+      (define-key minibuffer-local-map [escape] 'abort-recursive-edit)
+      (define-key minibuffer-local-ns-map [escape] 'abort-recursive-edit)
+      (define-key minibuffer-local-completion-map [escape] 'abort-recursive-edit)
+      (define-key minibuffer-local-must-match-map [escape] 'abort-recursive-edit)
+      (define-key minibuffer-local-isearch-map [escape] 'abort-recursive-edit)
 
-  (add-hook 'emacs-lisp-mode-hook 'rainbow-delimiters-mode)
-  (add-hook 'lisp-mode-hook 'rainbow-delimiters-mode)
-
-  (electric-pair-mode 1)
+      ;; modes to map to different default states
+      (evil-set-initial-state 'calendar-mode 'emacs)
+      (evil-set-initial-state 'org-mode 'emacs)
+      (evil-set-initial-state 'elfeed-search 'emacs)))
 #+END_SRC
 * Ibuffer
 ** Filter Groups
@@ -668,147 +888,186 @@ Remove the strange white line between fringes
   (defalias 'list-buffers 'ibuffer)
   (global-set-key (kbd "C-x C-b") 'ibuffer)
 #+END_SRC
-* Terminal Emulator
-** Choice of shell to launch
+* Javascript
 #+BEGIN_SRC emacs-lisp
 
-  (defvar my-term-shell "/usr/bin/zsh")
-  (defadvice ansi-term (before force-bash)
-    (interactive (list my-term-shell)))
-  (ad-activate 'ansi-term)
+  (use-package js2-mode
+    :ensure t
+    :init
+    (progn
+      (add-hook 'js-mode-hook 'js2-minor-mode)
+      ))
 
-  (defadvice term-sentinel (around my-advice-term-sentinel (proc msg))
-    (if (memq (process-status proc) '(signal exit))
-        (let ((buffer (process-buffer proc)))
-          ad-do-it
-          (kill-buffer buffer))
-      ad-do-it))
-  (ad-activate 'term-sentinel)
+  (use-package rjsx-mode
+    :ensure t)
+
+  (use-package js2-refactor
+    :ensure t
+    :config
+    (progn
+      (js2r-add-keybindings-with-prefix "C-c C-m")
+      (add-hook 'js2-mode #'js2-refactor-mode)))
+
+  (use-package nodejs-repl
+    :ensure t)
+
+  (add-hook 'js-mode-hook
+            (lambda ()
+              (define-key js-mode-map (kbd "C-x C-e") 'nodejs-repl-send-last-sexp)
+              (define-key js-mode-map (kbd "C-c C-r") 'nodejs-repl-send-region)
+              (define-key js-mode-map (kbd "C-c C-l") 'nodejs-repl-load-file)
+              (define-key js-mode-map (kbd "C-c C-z") 'nodejs-repl-switch-to-repl)))
+
+  (use-package json-mode
+    :ensure t)
 #+END_SRC
-** Mode Toggle and hooks
+* LaTeX /AUCTeX
+** Load Packages
 #+BEGIN_SRC emacs-lisp
-  (defun term-toggle-mode ()
-    (interactive)
-    (if (term-in-line-mode)
-        (term-char-mode)
-      (term-line-mode)))
 
-  (defun my-term-hook ()
-    (goto-address-mode)
-    (local-set-key "\C-c\C-j" 'term-toggle-mode) ;; toggle line/char mode
-    (local-set-key "\C-c\C-k" 'term-toggle-mode)
-    (setq global-hl-line-mode nil)
-    (setq term-buffer-maximum-size 10000)
-    (setq-local ml-interactive? t) ;; for mode line
-    (setq-local show-dir-in-mode-line? t) ;; also mode linec'
-    (setq show-trailing-whitespace nil)
-    ;; disable company in favor of shell completion
-    (company-mode -1))
-  (add-hook 'term-mode-hook 'my-term-hook)
-
-  (defalias 'sh 'ansi-term)
+  (load "auctex.el" nil t t)
+  (load "preview.el" nil t t)
+  (require 'texmathp)
 #+END_SRC
-* Shell and EShell
-** eshell
+** General Settings
 #+BEGIN_SRC emacs-lisp
-  (require 'eshell)
-  (defun my-eshell-hook ()
-    (eshell-read-aliases-list)
-    (setq global-hl-line-mode nil)
-    (setq show-trailing-whitespace nil)
-    (setq-local ml-interactive? t)
-    (eshell/addpath "~/bin"))
-  (add-hook 'eshell-mode-hook 'me-eshell-hook)
 
-  (add-hook 'eshell-mode-hook
-     (lambda ()
-       (add-to-list 'eshell-visual-commands "ssh")
-       (add-to-list 'eshell-visual-commands "htop")
-       (add-to-list 'eshell-visual-commands "ncmpcpp")
-       (add-to-list 'eshell-visual-commands "tail")))
+  (setq TeX-auto-save t)
+  (setq TeX-parse-self t)
+  (setq-default TeX-master nil)
+  (setq TeX-PDF-mode t)
+  (setq reftex-plug-into-AUCTeX t)
+  (setq TeX-save-query nil)
+  (setq-default TeX-command-extra-options "--shell-escape")
+  (setq TeX-error-overview-open-after-TeX-run t)
+  (setq TeX-electric-math '("$" . "$"))
+  (setq TeX-electric-sub-and-superscript t)
+  ;; fix for company completion
+  (define-key TeX-mode-map (kbd "TAB") 'tab-indent-or-complete)
+  (define-key TeX-mode-map [tab] 'tab-indent-or-complete)
 
-  (setq eshell-banner-message "")
+  (require 'font-latex)
+  (set-face-attribute 'font-latex-sectioning-5-face nil :family "CMU Bright")
+  (setq font-latex-fontify-sectioning 1.2)
+  (font-latex-update-sectioning-faces)
 
-  (defun eshell/clear ()
-    "Deletes the contents of eshell buffer, except the last prompt"
-    (save-excursion
-      (goto-char eshell-last-output-end)
-      (let ((lines (count-lines 1 (point)))
-            (inhibit-read-only t))
-        (beginning-of-line)
-        (let ((pos (point)))
-          (if (bobp)
-              (if (interactive-p)
-                  (error "Buffer too short to truncate"))
-            (delete-region (point-min) (point)))))))
-
-  (defun pwd-replace-home (pwd)
-    "Replace home in PWD with tilde (~) character."
-    (interactive)
-    (let* ((home (expand-file-name (getenv "HOME")))
-           (home-len (length home)))
-      (if (and
-           (>= (length pwd) home-len)
-           (equal home (substring pwd 0 home-len)))
-          (concat "~" (substring pwd home-len))
-        pwd)))
-
-  ;; a macro to propertize, stolen from emacswiki.
-  (defmacro with-face (str &rest properties)
-    `(propertize ,str 'face (list ,@properties)))
-  ;; the prompt function
-  (defun dennis-eshell-prompt ()
-    (let*
-        ;; need some string lengths to fill the screen with spaces
-        ((spc-cnt (length hostname))
-         (dir (pwd-replace-home (eshell/pwd)))
-         (offset (if (display-graphic-p)
-                     2 3)) ;; need extra offset in terminal
-         (fill-size (- (window-body-width) (+ spc-cnt (length dir) offset))))
-      ;; put together the prompt
-      (concat
-       "\n"
-       (with-face hostname :foreground "cornflower blue" :weight "bold")
-       (with-face "|" :foreground "red" :weight "bold")
-       (with-face dir :foreground "gold" :weight "extra-bold")
-       (make-string fill-size 32) ;; go to the right side
-       ;; the return status indicator
-       (if (equal eshell-last-command-status 0)
-           (with-face (char-to-string #x2713) :foreground "green" :weight "bold")
-         (with-face (char-to-string #x2717) :foreground "red" :weight "bold"))
-       "\n"
-       (make-string spc-cnt 32)
-       (with-face "|" :foreground "red" :weight "bold")
-       (with-face (char-to-string #x25b8) :foreground (face-attribute 'default :foreground))
-       " ")))
-  ;; set the prompt regexp for eshell to recognize what is prompt and what not.
-  (setq
-   eshell-prompt-function 'dennis-eshell-prompt
-   eshell-prompt-regexp (concat "\s*|" (char-to-string #x25b8) " ")) ;; \s* captures whitespace
-
-
+  (setq-default LaTeX-fill-break-at-separators (quote (\\\( \\\[ \\\])))
 #+END_SRC
-** shell
+** SyncTeX, Hooks, Latexmk, XeLaTeX, SpellChecking
 #+BEGIN_SRC emacs-lisp
 
-  (setq explicit-shell-file-name "/bin/zsh")
-  (add-hook 'shell-mode-hook 'no-trailing-whitespace)
-  (add-hook 'shell-mode-hook '(lambda () (setq-local ml-interactive? t)))
+  (setq TeX-source-correlate-method 'synctex)
+  (setq TeX-source-correlate-start-server t)
+  (add-hook 'LaTeX-mode-hook 'TeX-source-correlate-mode)
 
-  (setq scheme-program-name "guile")
-  (add-hook 'inferior-scheme-mode-hook 'no-trailing-whitespace)
-  (add-hook 'inferior-scheme-mode-hook '(lambda () (setq-local ml-interactive? t)))
-  ;; geiser
-  (setq geiser-repl-use-other-window nil)
-  (setq geiser-active-implementations '(guile))
-  (add-hook 'geiser-repl-mode-hook 'no-trailing-whitespace)
-  (add-hook 'geiser-repl-mode-hook 'turn-on-paredit)
-  (add-hook 'geiser-repl-mode-hook '(lambda () (setq-local ml-interactive? t)))
-  ;; scheme-mode
-  (add-hook 'scheme-mode-hook 'turn-on-paredit)
-  (add-hook 'scheme-mode-hook 'turn-on-geiser-mode)
+  (add-hook 'LaTeX-mode-hook 'visual-line-mode)
+  (add-hook 'LaTeX-mode-hook 'flyspell-mode)
+  (add-hook 'LaTeX-mode-hook 'LaTeX-math-mode)
+  (add-hook 'LaTeX-mode-hook 'turn-on-reftex)
+
+  (require 'auctex-latexmk)
+  (auctex-latexmk-setup)
+
+  (add-to-list 'TeX-command-list '("XeLaTeX" "%`xelatex %(extraopts)%(mode)%' %t" TeX-run-TeX nil t))
 
 
+  (require 'ispell)
+  (setq-default ispell-program-name "hunspell")
+  (setq ispell-really-hunspell t)
+
+  (setq ispell-dictionary-base-alist
+        '(("en_GB"
+           "[a-zA-Z]" "[^a-zA-Z]" "[']" nil
+           ("-d" "en_GB" "-i" "iso-8859-1") nil iso-8859-1)
+          ("de_DE"
+           "[a-zäöüßA-ZÄÖÜ]" "[^a-zäöüßA-ZÄÖÜ]" "[']" nil
+           ("-d" "de_DE" "-i" "iso-8859-1") nil iso-8859-1)))
+
+  (eval-after-load "ispell"
+    (progn
+      (setq ispell-dictionary "en_GB")
+      (setq ispell-silently-savep t))) ; save personal dict without confirmation
+#+END_SRC
+* magit
+#+BEGIN_SRC emacs-lisp
+  (use-package magit
+    :ensure t
+    :init
+    (global-set-key (kbd "C-x g") 'magit-status))
+
+  (use-package magithub-cache-file
+    :after magit
+    :config (magithub-feature-autoinject t))
+#+END_SRC
+* MarkDown mode and Pdf Tools
+#+BEGIN_SRC emacs-lisp
+
+  (use-package markdown-mode
+    :ensure t
+    :commands (markdown-mode gfm-mode)
+    :mode (("README\\.md\\'" . gfm-mode)
+           ("\\.md\\'" . markdown-mode)
+           ("\\.markdown\\'" . markdown-mode))
+    :init (setq markdown-command "multimarkdown"))
+
+  (use-package pdf-tools
+    :ensure t)
+#+END_SRC
+* Misc packages
+** ivy
+#+BEGIN_SRC emacs-lisp
+  (use-package ace-window
+    :ensure t
+    :init
+    (progn
+      (global-set-key [remap other-window] 'ace-window)
+      ))
+
+  (use-package counsel
+    :ensure t
+    )
+
+  (use-package ivy
+    :ensure t
+    :diminish (ivy-mode)
+    :bind(("C-x b" . ivy-switch-buffer))
+    :config
+    (ivy-mode 1)
+    (setq ivy-use-virtual-buffers t)
+    (setq ivy-display-style 'fancy))
+
+  (use-package swiper
+    :ensure t
+    :bind (("C-s" . swiper)
+           ("C-r" . swiper)
+           ("C-c C-r" . ivy-resume)
+           ("M-x" . counsel-M-x)
+           ("C-x C-f" . counsel-find-file))
+    :config
+    (progn
+      (ivy-mode 1)
+      (setq ivy-use-virtual-buffers t)
+      (setq ivy-display-style 'fancy)
+      (setq enable-recursive-minibuffers t)
+      (define-key read-expression-map (kbd "C-r") 'counsel-expression-history)
+      ))
+#+END_SRC
+** Delete Trailing whitespace
+#+BEGIN_SRC emacs-lisp
+  (add-hook 'before-save-hook 'delete-trailing-whitespace)
+#+END_SRC
+** Multiple Cursors
+#+BEGIN_SRC emacs-lisp
+  (use-package multiple-cursors
+    :ensure t
+    :defer  1)
+#+END_SRC
+* NeoTree
+#+BEGIN_SRC emacs-lisp
+  (use-package neotree
+    :ensure t
+    :config
+    (global-set-key [f8] 'neotree-toggle))
 #+END_SRC
 * Org Mode
 ** General Settings
@@ -1014,6 +1273,73 @@ Remove the strange white line between fringes
   (add-hook 'org-present-mode-hook 'my-org-present-setup)
   (add-hook 'org-present-mode-quit-hook 'my-org-present-teardown)
 #+END_SRC
+* Parentheses
+#+BEGIN_SRC emacs-lisp
+(require 'highlight-parentheses)
+  (show-paren-mode 1)
+  (setq show-paren-delay 0)
+
+  (define-globalized-minor-mode global-highlight-parentheses-mode
+    highlight-parentheses-mode
+    (lambda ()
+      (highlight-parentheses-mode t)))
+  (global-highlight-parentheses-mode t)
+
+  (require 'rainbow-delimiters)
+
+  (set-face-attribute 'rainbow-delimiters-depth-1-face nil
+		      :foreground "#78c5d6")
+  (set-face-attribute 'rainbow-delimiters-depth-2-face nil
+		      :foreground "#bf62a6")
+  (set-face-attribute 'rainbow-delimiters-depth-3-face nil
+		      :foreground "#459ba8")
+  (set-face-attribute 'rainbow-delimiters-depth-4-face nil
+		      :foreground "#e868a2")
+  (set-face-attribute 'rainbow-delimiters-depth-5-face nil
+		      :foreground "#79c267")
+  (set-face-attribute 'rainbow-delimiters-depth-6-face nil
+		      :foreground "#f28c33")
+  (set-face-attribute 'rainbow-delimiters-depth-7-face nil
+		      :foreground "#c5d647")
+  (set-face-attribute 'rainbow-delimiters-depth-8-face nil
+		      :foreground "#f5d63d")
+  (set-face-attribute 'rainbow-delimiters-depth-9-face nil
+		      :foreground "#78c5d6")
+
+  (set-face-attribute 'rainbow-delimiters-unmatched-face nil
+		      :foreground 'unspecified
+		      :inherit 'show-paren-mismatch
+		      :strike-through t)
+
+  (add-hook 'emacs-lisp-mode-hook 'rainbow-delimiters-mode)
+  (add-hook 'lisp-mode-hook 'rainbow-delimiters-mode)
+
+  (electric-pair-mode 1)
+#+END_SRC
+* Projectile and Dumb-jump
+#+BEGIN_SRC emacs-lisp
+
+  (use-package projectile
+    :ensure t
+    :config
+    (projectile-global-mode)
+  (setq projectile-completion-system 'ivy))
+
+  (use-package counsel-projectile
+    :ensure t
+    :config
+    (counsel-projectile-on))
+
+  (use-package dumb-jump
+    :bind (("M-g o" . dumb-jump-go-other-window)
+           ("M-g j" . dumb-jump-go)
+           ("M-g x" . dumb-jump-go-prefered-external)
+           ("M-g z" . dumb-jump-go-external-other-window))
+    :config (setq dumb-jump-selector 'ivy)
+    :init
+    (dumb-jump-mode)
+    :ensure)
+#+END_SRC
 * Python
 ** Flycheck
 #+BEGIN_SRC emacs-lisp
@@ -1069,226 +1395,238 @@ Remove the strange white line between fringes
           elpy-module-yasnippet
           elpy-module-sane-defaults))))
 #+END_SRC
-* Company
+* Spaces and Tabs
 #+BEGIN_SRC emacs-lisp
+  (setq-default indent-tabs-mode nil)
+  (setq-default tab-width 2)
+  (setq-default tab-stop-list (number-sequence 2 120 2))
+  (setq c-basic-indent 2)
+  (setq sh-basic-offset 2)
 
-  (require 'company)
-  (setq company-tooltip-align-annotations t)
-  (setq company-selection-wrap-around t)
-  (setq company-tooltip-flip-when-above t)
-  (setq company-idle-delay 0.0)
-  (add-hook 'after-init-hook 'global-company-mode)
+  (defun my-tabs-makefile-hook ()
+    (setq indent-tabs-mode t))
+  (add-hook 'makefile-mode-hook 'my-tabs-makefile-hook)
+#+END_SRC
+* Shell and EShell
+** eshell
+#+BEGIN_SRC emacs-lisp
+  (require 'eshell)
+  (defun my-eshell-hook ()
+    (eshell-read-aliases-list)
+    (setq global-hl-line-mode nil)
+    (setq show-trailing-whitespace nil)
+    (setq-local ml-interactive? t)
+    (eshell/addpath "~/bin"))
+  (add-hook 'eshell-mode-hook 'me-eshell-hook)
 
-  (require 'company-dabbrev)
-  (require 'company-dabbrev-code)
-  (setq company-dabbrev-code-everywhere t)
-  (setq company-dabbrev-code-ignore-case nil)
-  (setq company-dabbrev-ignore-case nil)
-  (add-to-list 'company-dabbrev-code-modes 'julia-mode)
-  (add-to-list 'company-dabbrev-code-modes 'matlab-mode)
-  (add-to-list 'company-dabbrev-code-modes 'matlab-shell-mode)
+  (add-hook 'eshell-mode-hook
+     (lambda ()
+       (add-to-list 'eshell-visual-commands "ssh")
+       (add-to-list 'eshell-visual-commands "htop")
+       (add-to-list 'eshell-visual-commands "ncmpcpp")
+       (add-to-list 'eshell-visual-commands "tail")))
 
-  (define-key company-active-map [tab] 'company-complete-common-or-cycle)
-  (define-key company-active-map (kbd "TAB") 'company-complete-common-or-cycle)
+  (setq eshell-banner-message "")
 
-  (require 'company-auctex)
-  (require 'company-math)
-  (require 'company-c-headers)
-  (add-to-list 'company-c-headers-path-system "/usr/include/c++/7.1.1/")
-
-  (defvar my-company-backends nil
-    "A list of my company backends")
-  (setq my-company-backends
-        '(company-auctex-labels
-          company-auctex-bibs
-          (company-auctex-macros company-auctex-symbols company-auctex-environments)
-          (company-math-symbols-latex company-math-symbols-unicode)
-          company-ispell
-          (company-semantic
-           company-clang company-c-headers)
-          company-bbdb
-          company-elisp
-          ac-js2-company
-          company-nxml
-          company-css
-          company-eclim
-          company-cmake
-          company-capf
-          (company-dabbrev-code company-gtags company-etags company-keywords)
-          company-oddmuse
-          company-files
-          company-dabbrev
-          company-yasnippet))
-  (setq company-backends my-company-backends)
-
-  (defun add-yas-to-company-backends (backend)
-    "Add yasnippet suggestions to the `company-mode' backend BACKEND.
-
-    Returns an alist of (BACKEND :with company-yasnippet)."
-    (if (or (eq backend 'company-yasnippet)
-            (and (listp backend) (member 'company-yasnippet backend)))
-        ;; do nothing
-        backend
-      ;; else append :with company-yasnippet
-      (append (if (consp backend) backend (list backend))
-              '(:with company-yasnippet))))
-  ;; set the backends if wanted---not right now
-  ;; (setq company-backends (mapcar #'add-yas-to-company-backends my-company-backends))
-
-  (defun my-elpy-module-company (command &rest args)
-    "Prepare company for elpy, without being too intrusive."
-    (pcase command
-      (`global-init
-       (require 'company)
-       (elpy-modules-remove-modeline-lighter 'company-mode)
-       (define-key company-active-map (kbd "C-d")
-         'company-show-doc-buffer))
-      (`buffer-init
-       (set (make-local-variable 'company-backends)
-            ;; to enable yasnippet suggestions, use the following instead:
-            ;; (cons '(elpy-company-backend :with company-yasnippet)
-            (cons '(elpy-company-backend)
-                  (mapcar #'identity ;; if want yasnippet, change here
-                          (delq 'company-semantic
-                                (delq 'company-ropemacs
-                                      (delq 'company-capf
-                                            my-company-backends))))))
-       (company-mode 1))
-      (`buffer-stop
-       (company-mode -1)
-       (kill-local-variable 'company-backends))))
-
-  (advice-add 'elpy-module-company :override #'my-elpy-module-company)
-
-  (defun check-expansion ()
+  (defun eshell/clear ()
+    "Deletes the contents of eshell buffer, except the last prompt"
     (save-excursion
-      (if (looking-at "\\_>") t
-        (backward-char 1)
-        (if (looking-at "\\.") t
-          (backward-char 1)
-          (if (looking-at "->") t nil)))))
+      (goto-char eshell-last-output-end)
+      (let ((lines (count-lines 1 (point)))
+            (inhibit-read-only t))
+        (beginning-of-line)
+        (let ((pos (point)))
+          (if (bobp)
+              (if (interactive-p)
+                  (error "Buffer too short to truncate"))
+            (delete-region (point-min) (point)))))))
 
-  (defun do-yas-expand ()
-    (let ((yas-fallback-behavior 'return-nil))
-      (yas-expand)))
-
-  (defun tab-indent-or-complete ()
+  (defun pwd-replace-home (pwd)
+    "Replace home in PWD with tilde (~) character."
     (interactive)
-    (if (minibufferp)
-        (minibuffer-complete)
-      (if (or (not yas-minor-mode) ;; xxx change this to point to right var
-              (null (when (looking-at "\\_>") (do-yas-expand))))
-          (if (check-expansion)
-              (company-complete-common)
-            (indent-for-tab-command)))))
+    (let* ((home (expand-file-name (getenv "HOME")))
+           (home-len (length home)))
+      (if (and
+           (>= (length pwd) home-len)
+           (equal home (substring pwd 0 home-len)))
+          (concat "~" (substring pwd home-len))
+        pwd)))
 
-  (define-key prog-mode-map [tab] 'tab-indent-or-complete)
-  (define-key prog-mode-map (kbd "TAB") 'tab-indent-or-complete)
+  ;; a macro to propertize, stolen from emacswiki.
+  (defmacro with-face (str &rest properties)
+    `(propertize ,str 'face (list ,@properties)))
+  ;; the prompt function
+  (defun dennis-eshell-prompt ()
+    (let*
+        ;; need some string lengths to fill the screen with spaces
+        ((spc-cnt (length hostname))
+         (dir (pwd-replace-home (eshell/pwd)))
+         (offset (if (display-graphic-p)
+                     2 3)) ;; need extra offset in terminal
+         (fill-size (- (window-body-width) (+ spc-cnt (length dir) offset))))
+      ;; put together the prompt
+      (concat
+       "\n"
+       (with-face hostname :foreground "cornflower blue" :weight "bold")
+       (with-face "|" :foreground "red" :weight "bold")
+       (with-face dir :foreground "gold" :weight "extra-bold")
+       (make-string fill-size 32) ;; go to the right side
+       ;; the return status indicator
+       (if (equal eshell-last-command-status 0)
+           (with-face (char-to-string #x2713) :foreground "green" :weight "bold")
+         (with-face (char-to-string #x2717) :foreground "red" :weight "bold"))
+       "\n"
+       (make-string spc-cnt 32)
+       (with-face "|" :foreground "red" :weight "bold")
+       (with-face (char-to-string #x25b8) :foreground (face-attribute 'default :foreground))
+       " ")))
+  ;; set the prompt regexp for eshell to recognize what is prompt and what not.
+  (setq
+   eshell-prompt-function 'dennis-eshell-prompt
+   eshell-prompt-regexp (concat "\s*|" (char-to-string #x25b8) " ")) ;; \s* captures whitespace
+
 
 #+END_SRC
-** Theme
+** shell
 #+BEGIN_SRC emacs-lisp
-  (set-face-attribute 'company-tooltip nil
-                      :foreground (face-attribute 'font-lock-comment-face :foreground)
-                      :background (face-attribute 'fringe :background))
-  (set-face-attribute 'company-tooltip-selection nil
-                      :background "gray30"
-                      :slant 'italic
-                      :weight 'semibold)
 
-  (set-face-attribute 'company-tooltip-common nil
-                      :foreground (face-attribute 'font-lock-builtin-face :foreground))
-  (set-face-attribute 'company-tooltip-common-selection nil
-                      :foreground (face-attribute 'font-lock-builtin-face :foreground)
-                      :slant 'italic
-                      :weight 'semibold)
+  (setq explicit-shell-file-name "/bin/zsh")
+  (add-hook 'shell-mode-hook 'no-trailing-whitespace)
+  (add-hook 'shell-mode-hook '(lambda () (setq-local ml-interactive? t)))
 
-  (set-face-attribute 'company-tooltip-annotation nil
-                      :foreground (face-attribute 'font-lock-comment-face :foreground))
+  (setq scheme-program-name "guile")
+  (add-hook 'inferior-scheme-mode-hook 'no-trailing-whitespace)
+  (add-hook 'inferior-scheme-mode-hook '(lambda () (setq-local ml-interactive? t)))
+  ;; geiser
+  (setq geiser-repl-use-other-window nil)
+  (setq geiser-active-implementations '(guile))
+  (add-hook 'geiser-repl-mode-hook 'no-trailing-whitespace)
+  (add-hook 'geiser-repl-mode-hook 'turn-on-paredit)
+  (add-hook 'geiser-repl-mode-hook '(lambda () (setq-local ml-interactive? t)))
+  ;; scheme-mode
+  (add-hook 'scheme-mode-hook 'turn-on-paredit)
+  (add-hook 'scheme-mode-hook 'turn-on-geiser-mode)
 
-  (set-face-attribute 'company-scrollbar-fg nil
-                      :background (face-attribute 'font-lock-comment-face :foreground))
-  (set-face-attribute 'company-scrollbar-bg nil
-                      :background (face-attribute 'fringe :background))
 
-  (set-face-attribute 'company-preview-common nil
-                      :foreground (face-attribute 'font-lock-builtin-face :foreground)
-                      :background "SlateBlue4")
-  (set-face-attribute 'company-preview nil
-                      :foreground (face-attribute 'font-lock-builtin-face :foreground)
-                      :background "SlateBlue4")
-  (set-face-attribute 'company-preview-search nil
-                      :background "SlateBlue1")
 #+END_SRC
-* Yasnippet
+* Terminal Emulator
+** Choice of shell to launch
 #+BEGIN_SRC emacs-lisp
-     (use-package yasnippet
-       :ensure t
-       :init
-    (yas-global-mode 1))
+
+  (defvar my-term-shell "/usr/bin/zsh")
+  (defadvice ansi-term (before force-bash)
+    (interactive (list my-term-shell)))
+  (ad-activate 'ansi-term)
+
+  (defadvice term-sentinel (around my-advice-term-sentinel (proc msg))
+    (if (memq (process-status proc) '(signal exit))
+        (let ((buffer (process-buffer proc)))
+          ad-do-it
+          (kill-buffer buffer))
+      ad-do-it))
+  (ad-activate 'term-sentinel)
 #+END_SRC
-** Keybindings and popup settings
+** Mode Toggle and hooks
 #+BEGIN_SRC emacs-lisp
+  (defun term-toggle-mode ()
+    (interactive)
+    (if (term-in-line-mode)
+        (term-char-mode)
+      (term-line-mode)))
 
-  (define-key yas-minor-mode-map (kbd "<tab>") nil)
-  (define-key yas-minor-mode-map (kbd "TAB") nil)
-  (define-key yas-minor-mode-map (kbd "<backtab>") 'yas-expand)
+  (defun my-term-hook ()
+    (goto-address-mode)
+    (local-set-key "\C-c\C-j" 'term-toggle-mode) ;; toggle line/char mode
+    (local-set-key "\C-c\C-k" 'term-toggle-mode)
+    (setq global-hl-line-mode nil)
+    (setq term-buffer-maximum-size 10000)
+    (setq-local ml-interactive? t) ;; for mode line
+    (setq-local show-dir-in-mode-line? t) ;; also mode linec'
+    (setq show-trailing-whitespace nil)
+    ;; disable company in favor of shell completion
+    (company-mode -1))
+  (add-hook 'term-mode-hook 'my-term-hook)
 
-  (require 'popup)
-  (define-key popup-menu-keymap (kbd "M-n") 'popup-next)
-  (define-key popup-menu-keymap (kbd "TAB") 'popup-next)
-  (define-key popup-menu-keymap (kbd "<tab>") 'popup-next)
-  (define-key popup-menu-keymap (kbd "<backtab>") 'popup-previous)
-  (define-key popup-menu-keymap (kbd "M-p") 'popup-previous)
-  (defun yas-popup-isearch-prompt (prompt choices &optional display-fn)
-    (when (featurep 'popup)
-      (popup-menu*
-       (mapcar
-        (lambda (choice)
-          (popup-make-item
-           (or (and display-fn (funcall display-fn choice))
-               choice)
-           :value choice))
-        choices)
-       :prompt prompt
-       ;; start isearch mode immediately
-       :isearch t)))
-
-  (set-face-attribute 'popup-face nil
-                      :foreground (face-attribute 'font-lock-comment-face :foreground)
-                      :background (face-attribute 'fringe :background))
-
-  (set-face-attribute 'popup-menu-mouse-face nil
-                      :foreground (face-attribute 'font-lock-comment-face :foreground)
-                      :background (face-attribute 'fringe :background))
-
-  (set-face-attribute 'popup-menu-selection-face nil
-                      :background "gray30"
-                      :foreground (face-attribute 'font-lock-builtin-face :foreground))
-
-  (set-face-attribute 'popup-menu-summary-face nil
-                      :foreground (face-attribute 'font-lock-builtin-face :foreground))
-
-  (set-face-attribute 'popup-summary-face nil
-                      :foreground (face-attribute 'font-lock-builtin-face :foreground))
-
-  (set-face-attribute 'popup-scroll-bar-foreground-face nil
-                      :background (face-attribute 'font-lock-comment-face :foreground))
-  (set-face-attribute 'popup-scroll-bar-background-face nil
-                      :background (face-attribute 'fringe :background))
-
-  (setq yas-prompt-functions '(yas-popup-isearch-prompt yas-ido-prompt yas-no-prompt))
+  (defalias 'sh 'ansi-term)
 #+END_SRC
-* magit
+* Trailing white space
 #+BEGIN_SRC emacs-lisp
-  (use-package magit
+  (require 'whitespace)
+  (setq-default show-trailing-whitespace t)
+#+END_SRC
+** Don't show trailing whitespace in some modes
+#+BEGIN_SRC emacs-lisp
+  (defun no-trailing-whitespace ()
+    (setq show-trailing-whitespace nil))
+
+  (add-hook 'minibuffer-setup-hook
+	    'no-trailing-whitespace)
+  (add-hook 'eww-mode-hook
+	    'no-trailing-whitespace)
+  (add-hook 'ielm-mode-hook
+	    'no-trailing-whitespace)
+  (add-hook 'gdb-mode-hook
+	    'no-trailing-whitespace)
+  (add-hook 'help-mode-hook
+	    'no-trailing-whitespace)
+#+END_SRC
+* Web packages
+#+BEGIN_SRC emacs-lisp
+
+  (use-package web-mode
     :ensure t
-    :init
-    (global-set-key (kbd "C-x g") 'magit-status))
+    :config
+    (add-to-list 'auto-mode-alist '("\\.html?\\'" . web-mode))
+    (add-to-list 'auto-mode-alist '("\\.html\\.erb\\'" . web-mode))
+    (add-to-list 'auto-mode-alist '("\\.mustache\\'" . web-mode))
+    (add-to-list 'auto-mode-alist '("\\.jinja\\'" . web-mode))
+    (add-to-list 'auto-mode-alist '("\\.php\\'" . web-mode))
+    (add-to-list 'auto-mode-alist '("\\.tsx\\'" . web-mode))
+    (setq web-mode-engines-alist
+          '(("django"   . "\\.html\\'")))
+    (setq web-mode-enable-auto-closing t))
 
-  (use-package magithub-cache-file
-    :after magit
-    :config (magithub-feature-autoinject t))
+  (defun my-setup-indent (n)
+    ;; java/c/c++
+    (setq c-basic-offset n)
+    ;; web development
+    (setq coffee-tab-width n) ; coffeescript
+    (setq javascript-indent-level n) ; javascript-mode
+    (setq js-indent-level n) ; js-mode
+    (setq js2-basic-offset n) ; js2-mode, in latest js2-mode, it's alias of js-indent-level
+    (setq web-mode-markup-indent-offset n) ; web-mode, html tag in html file
+    (setq web-mode-css-indent-offset n) ; web-mode, css in html file
+    (setq web-mode-code-indent-offset n) ; web-mode, js code in html file
+    (setq css-indent-offset n) ; css-mode
+    )
+
+  (my-setup-indent 2) ; indent 2 spaces width
+
+  (use-package tide
+    :ensure t
+    :config
+    (defun setup-tide-mode ()
+      (interactive)
+      (tide-setup)
+      (flycheck-mode +1)
+      (setq flycheck-check-syntax-automatically '(save mode-enabled))
+      (eldoc-mode +1)
+      (tide-hl-identifier-mode +1)
+      (company-mode +1)))
+
+  (use-package php-mode
+    :ensure t)
+
+  (use-package go-mode
+    :ensure t)
+
+  (use-package emmet-mode
+    :ensure t
+    :config
+    (add-hook 'sqml-mode-hook 'emmet-mode)
+    (add-hook 'web-mode-hook 'emmet-mode)
+    (add-hook 'css-mode-hook 'emmet-mode)
+  )
 #+END_SRC
 * Writing font
 ** Serif font for text
@@ -1370,410 +1708,62 @@ Remove the strange white line between fringes
                  (when show-echo (message "Restored default fonts.")))))))
 
 #+END_SRC
-* LaTeX /AUCTeX
-** Load Packages
+* Yasnippet
 #+BEGIN_SRC emacs-lisp
-
-  (load "auctex.el" nil t t)
-  (load "preview.el" nil t t)
-  (require 'texmathp)
+     (use-package yasnippet
+       :ensure t
+       :init
+    (yas-global-mode 1))
 #+END_SRC
-** General Settings
+** Keybindings and popup settings
 #+BEGIN_SRC emacs-lisp
 
-  (setq TeX-auto-save t)
-  (setq TeX-parse-self t)
-  (setq-default TeX-master nil)
-  (setq TeX-PDF-mode t)
-  (setq reftex-plug-into-AUCTeX t)
-  (setq TeX-save-query nil)
-  (setq-default TeX-command-extra-options "--shell-escape")
-  (setq TeX-error-overview-open-after-TeX-run t)
-  (setq TeX-electric-math '("$" . "$"))
-  (setq TeX-electric-sub-and-superscript t)
-  ;; fix for company completion
-  (define-key TeX-mode-map (kbd "TAB") 'tab-indent-or-complete)
-  (define-key TeX-mode-map [tab] 'tab-indent-or-complete)
+  (define-key yas-minor-mode-map (kbd "<tab>") nil)
+  (define-key yas-minor-mode-map (kbd "TAB") nil)
+  (define-key yas-minor-mode-map (kbd "<backtab>") 'yas-expand)
 
-  (require 'font-latex)
-  (set-face-attribute 'font-latex-sectioning-5-face nil :family "CMU Bright")
-  (setq font-latex-fontify-sectioning 1.2)
-  (font-latex-update-sectioning-faces)
+  (require 'popup)
+  (define-key popup-menu-keymap (kbd "M-n") 'popup-next)
+  (define-key popup-menu-keymap (kbd "TAB") 'popup-next)
+  (define-key popup-menu-keymap (kbd "<tab>") 'popup-next)
+  (define-key popup-menu-keymap (kbd "<backtab>") 'popup-previous)
+  (define-key popup-menu-keymap (kbd "M-p") 'popup-previous)
+  (defun yas-popup-isearch-prompt (prompt choices &optional display-fn)
+    (when (featurep 'popup)
+      (popup-menu*
+       (mapcar
+        (lambda (choice)
+          (popup-make-item
+           (or (and display-fn (funcall display-fn choice))
+               choice)
+           :value choice))
+        choices)
+       :prompt prompt
+       ;; start isearch mode immediately
+       :isearch t)))
 
-  (setq-default LaTeX-fill-break-at-separators (quote (\\\( \\\[ \\\])))
-#+END_SRC
-** SyncTeX, Hooks, Latexmk, XeLaTeX, SpellChecking
-#+BEGIN_SRC emacs-lisp
+  (set-face-attribute 'popup-face nil
+                      :foreground (face-attribute 'font-lock-comment-face :foreground)
+                      :background (face-attribute 'fringe :background))
 
-  (setq TeX-source-correlate-method 'synctex)
-  (setq TeX-source-correlate-start-server t)
-  (add-hook 'LaTeX-mode-hook 'TeX-source-correlate-mode)
+  (set-face-attribute 'popup-menu-mouse-face nil
+                      :foreground (face-attribute 'font-lock-comment-face :foreground)
+                      :background (face-attribute 'fringe :background))
 
-  (add-hook 'LaTeX-mode-hook 'visual-line-mode)
-  (add-hook 'LaTeX-mode-hook 'flyspell-mode)
-  (add-hook 'LaTeX-mode-hook 'LaTeX-math-mode)
-  (add-hook 'LaTeX-mode-hook 'turn-on-reftex)
+  (set-face-attribute 'popup-menu-selection-face nil
+                      :background "gray30"
+                      :foreground (face-attribute 'font-lock-builtin-face :foreground))
 
-  (require 'auctex-latexmk)
-  (auctex-latexmk-setup)
+  (set-face-attribute 'popup-menu-summary-face nil
+                      :foreground (face-attribute 'font-lock-builtin-face :foreground))
 
-  (add-to-list 'TeX-command-list '("XeLaTeX" "%`xelatex %(extraopts)%(mode)%' %t" TeX-run-TeX nil t))
+  (set-face-attribute 'popup-summary-face nil
+                      :foreground (face-attribute 'font-lock-builtin-face :foreground))
 
+  (set-face-attribute 'popup-scroll-bar-foreground-face nil
+                      :background (face-attribute 'font-lock-comment-face :foreground))
+  (set-face-attribute 'popup-scroll-bar-background-face nil
+                      :background (face-attribute 'fringe :background))
 
-  (require 'ispell)
-  (setq-default ispell-program-name "hunspell")
-  (setq ispell-really-hunspell t)
-
-  (setq ispell-dictionary-base-alist
-        '(("en_GB"
-           "[a-zA-Z]" "[^a-zA-Z]" "[']" nil
-           ("-d" "en_GB" "-i" "iso-8859-1") nil iso-8859-1)
-          ("de_DE"
-           "[a-zäöüßA-ZÄÖÜ]" "[^a-zäöüßA-ZÄÖÜ]" "[']" nil
-           ("-d" "de_DE" "-i" "iso-8859-1") nil iso-8859-1)))
-
-  (eval-after-load "ispell"
-    (progn
-      (setq ispell-dictionary "en_GB")
-      (setq ispell-silently-savep t))) ; save personal dict without confirmation
-#+END_SRC
-* Elfeed
-#+BEGIN_SRC emacs-lisp
-
-  (setq elfeed-db-directory "~/Documents/shared/elfeeddb")
-
-  (defun elfeed-mark-all-as-read ()
-    (interactive)
-    (mark-whole-buffer)
-    (elfeed-search-untag-all-unread))
-
-  (use-package elfeed-goodies
-    :ensure t
-    :config
-    (elfeed-goodies/setup))
-
-
-  (use-package elfeed-org
-    :ensure t
-    :config
-    (elfeed-org)
-    (setq rmh-elfeed-org-files (list "~/Documents/shared/elfeed.org")))
-
-
-  ;; elfeed feed reader                                                     ;;
-  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-  ;;shortcut functions
-  (defun bjm/elfeed-show-all ()
-    (interactive)
-    (bookmark-maybe-load-default-file)
-    (bookmark-jump "elfeed-all"))
-  (defun bjm/elfeed-show-emacs ()
-    (interactive)
-    (bookmark-maybe-load-default-file)
-    (bookmark-jump "elfeed-emacs"))
-  (defun bjm/elfeed-show-daily ()
-    (interactive)
-    (bookmark-maybe-load-default-file)
-    (bookmark-jump "elfeed-daily"))
-  (defun bjm/elfeed-show-web ()
-    (interactive)
-    (bookmark-maybe-load-default-file)
-    (bookmark-jump "elfeed-web"))
-  ;;functions to support syncing .elfeed between machines
-  ;;makes sure elfeed reads index from disk before launching
-  (defun bjm/elfeed-load-db-and-open ()
-    "Wrapper to load the elfeed db from disk before opening"
-    (interactive)
-    (elfeed-db-load)
-    (elfeed)
-    (elfeed-search-update--force))
-
-  ;;write to disk when quiting
-  (defun bjm/elfeed-save-db-and-bury ()
-    "Wrapper to save the elfeed db to disk before burying buffer"
-    (interactive)
-    (elfeed-db-save)
-    (quit-window))
-
-  (use-package elfeed
-    :ensure t
-    :config
-    (global-set-key (kbd "C-x w") 'elfeed)
-    :bind (:map elfeed-search-mode-map
-                ("A" . bjm/elfeed-show-all)
-                ("E" . bjm/elfeed-show-emacs)
-                ("D" . bjm/elfeed-show-daily)
-                ("W" . bjm/elfeed-show-web)
-                ("q" . bjm/elfeed-save-db-and-bury)))
-#+END_SRC
-* MarkDown mode and Pdf Tools
-#+BEGIN_SRC emacs-lisp
-
-  (use-package markdown-mode
-    :ensure t
-    :commands (markdown-mode gfm-mode)
-    :mode (("README\\.md\\'" . gfm-mode)
-           ("\\.md\\'" . markdown-mode)
-           ("\\.markdown\\'" . markdown-mode))
-    :init (setq markdown-command "multimarkdown"))
-
-  (use-package pdf-tools
-    :ensure t)
-#+END_SRC
-* Javascript
-#+BEGIN_SRC emacs-lisp
-
-  (use-package js2-mode
-    :ensure t
-    :init
-    (progn
-      (add-hook 'js-mode-hook 'js2-minor-mode)
-      ))
-
-  (use-package rjsx-mode
-    :ensure t)
-
-  (use-package js2-refactor
-    :ensure t
-    :config
-    (progn
-      (js2r-add-keybindings-with-prefix "C-c C-m")
-      (add-hook 'js2-mode #'js2-refactor-mode)))
-
-  (use-package tern
-    :ensure tern
-    :config
-    (progn
-      (add-hook 'js-mode-hook (lambda () (tern-mode t)))
-      (add-hook 'js2-mode-hook (lambda () (tern-mode t)))
-      (add-to-list 'auto-mode-alist '("\\.js\\'" . js2-mode))))
-
-  (use-package nodejs-repl
-    :ensure t)
-
-  (add-hook 'js-mode-hook
-            (lambda ()
-              (define-key js-mode-map (kbd "C-x C-e") 'nodejs-repl-send-last-sexp)
-              (define-key js-mode-map (kbd "C-c C-r") 'nodejs-repl-send-region)
-              (define-key js-mode-map (kbd "C-c C-l") 'nodejs-repl-load-file)
-              (define-key js-mode-map (kbd "C-c C-z") 'nodejs-repl-switch-to-repl)))
-
-  (use-package json-mode
-    :ensure t)
-#+END_SRC
-* NeoTree
-#+BEGIN_SRC emacs-lisp
-  (use-package neotree
-    :ensure t
-    :config
-    (global-set-key [f8] 'neotree-toggle))
-#+END_SRC
-* Web packages
-#+BEGIN_SRC emacs-lisp
-
-  (use-package web-mode
-    :ensure t
-    :config
-    (add-to-list 'auto-mode-alist '("\\.html?\\'" . web-mode))
-    (add-to-list 'auto-mode-alist '("\\.html\\.erb\\'" . web-mode))
-    (add-to-list 'auto-mode-alist '("\\.mustache\\'" . web-mode))
-    (add-to-list 'auto-mode-alist '("\\.jinja\\'" . web-mode))
-    (add-to-list 'auto-mode-alist '("\\.php\\'" . web-mode))
-    (add-to-list 'auto-mode-alist '("\\.tsx\\'" . web-mode))
-    (setq web-mode-engines-alist
-          '(("django"   . "\\.html\\'")))
-    (setq web-mode-enable-auto-closing t))
-
-  (defun my-setup-indent (n)
-    ;; java/c/c++
-    (setq c-basic-offset n)
-    ;; web development
-    (setq coffee-tab-width n) ; coffeescript
-    (setq javascript-indent-level n) ; javascript-mode
-    (setq js-indent-level n) ; js-mode
-    (setq js2-basic-offset n) ; js2-mode, in latest js2-mode, it's alias of js-indent-level
-    (setq web-mode-markup-indent-offset n) ; web-mode, html tag in html file
-    (setq web-mode-css-indent-offset n) ; web-mode, css in html file
-    (setq web-mode-code-indent-offset n) ; web-mode, js code in html file
-    (setq css-indent-offset n) ; css-mode
-    )
-
-  (my-setup-indent 2) ; indent 2 spaces width
-
-  (use-package tide
-    :ensure t
-    :config
-    (defun setup-tide-mode ()
-      (interactive)
-      (tide-setup)
-      (flycheck-mode +1)
-      (setq flycheck-check-syntax-automatically '(save mode-enabled))
-      (eldoc-mode +1)
-      (tide-hl-identifier-mode +1)
-      (company-mode +1)))
-
-  (use-package php-mode
-    :ensure t)
-
-  (use-package go-mode
-    :ensure t)
-
-  (use-package emmet-mode
-    :ensure t
-    :config
-    (add-hook 'sqml-mode-hook 'emmet-mode)
-    (add-hook 'web-mode-hook 'emmet-mode)
-    (add-hook 'css-mode-hook 'emmet-mode)
-  )
-#+END_SRC
-* Misc packages
-** ivy
-#+BEGIN_SRC emacs-lisp
-  (use-package ace-window
-    :ensure t
-    :init
-    (progn
-      (global-set-key [remap other-window] 'ace-window)
-      ))
-
-  (use-package counsel
-    :ensure t
-    )
-
-  (use-package ivy
-    :ensure t
-    :diminish (ivy-mode)
-    :bind(("C-x b" . ivy-switch-buffer))
-    :config
-    (ivy-mode 1)
-    (setq ivy-use-virtual-buffers t)
-    (setq ivy-display-style 'fancy))
-
-  (use-package swiper
-    :ensure t
-    :bind (("C-s" . swiper)
-           ("C-r" . swiper)
-           ("C-c C-r" . ivy-resume)
-           ("M-x" . counsel-M-x)
-           ("C-x C-f" . counsel-find-file))
-    :config
-    (progn
-      (ivy-mode 1)
-      (setq ivy-use-virtual-buffers t)
-      (setq ivy-display-style 'fancy)
-      (setq enable-recursive-minibuffers t)
-      (define-key read-expression-map (kbd "C-r") 'counsel-expression-history)
-      ))
-#+END_SRC
-** Delete Trailing whitespace
-#+BEGIN_SRC emacs-lisp
-  (add-hook 'before-save-hook 'delete-trailing-whitespace)
-#+END_SRC
-** Multiple Cursors
-#+BEGIN_SRC emacs-lisp
-  (use-package multiple-cursors
-    :ensure t
-    :defer  1)
-#+END_SRC
-* Projectile and Dumb-jump
-#+BEGIN_SRC emacs-lisp
-
-  (use-package projectile
-    :ensure t
-    :config
-    (projectile-global-mode)
-  (setq projectile-completion-system 'ivy))
-
-  (use-package counsel-projectile
-    :ensure t
-    :config
-    (counsel-projectile-on))
-
-  (use-package dumb-jump
-    :bind (("M-g o" . dumb-jump-go-other-window)
-           ("M-g j" . dumb-jump-go)
-           ("M-g x" . dumb-jump-go-prefered-external)
-           ("M-g z" . dumb-jump-go-external-other-window))
-    :config (setq dumb-jump-selector 'ivy)
-    :init
-    (dumb-jump-mode)
-    :ensure)
-#+END_SRC
-* Evil mode
-#+BEGIN_SRC emacs-lisp
-
-  (use-package evil
-    :init
-    (progn
-      ;; if we don't have this evil overwrites the cursor color
-      (setq evil-default-cursor t)
-
-      ;; leader shortcuts
-
-      ;; This has to be before we invoke evil-mode due to:
-      ;; https://github.com/cofi/evil-leader/issues/10
-      (use-package evil-leader
-        :init (global-evil-leader-mode t)
-        :config
-        (progn
-          (setq evil-leader/in-all-states t)
-          ;; keyboard shortcuts
-          (evil-leader/set-key
-            "a" 'ag-project
-            "A" 'ag
-            "b" 'ido-switch-buffer
-            "c" 'mc/mark-next-like-this
-            "C" 'mc/mark-all-like-this
-            "e" 'er/expand-region
-            "E" 'mc/edit-lines
-            "f" 'ido-find-file
-            "g" 'magit-status
-            "i" 'idomenu
-            "j" 'ace-jump-mode
-            "k" 'kill-buffer
-            "K" 'kill-this-buffer
-            "o" 'occur
-            "p" 'magit-find-file-completing-read
-            "r" 'recentf-ido-find-file
-            "s" 'ag-project
-            "t" 'bw-open-term
-            "T" 'eshell
-            "w" 'save-buffer
-            "x" 'smex
-            "li" 'evilnc-comment-or-uncomment-lines
-            "ll" 'evilnc-quick-comment-or-uncomment-to-the-line
-            "ll" 'evilnc-quick-comment-or-uncomment-to-the-line
-            "lc" 'evilnc-copy-and-comment-lines
-            "lp" 'evilnc-comment-or-uncomment-paragraphs
-            "lr" 'comment-or-uncomment-region
-            "lv" 'evilnc-toggle-invert-comment-line-by-line
-            "."  'evilnc-copy-and-comment-operator
-            "\\" 'evilnc-comment-operator ; if you prefer backslash key
-            )))
-
-      ;; boot evil by default
-      (evil-mode 1))
-    :config
-    (progn
-      ;; use ido to open files
-      (define-key evil-ex-map "e " 'ido-find-file)
-      (define-key evil-ex-map "b " 'ido-switch-buffer)
-
-      (setq
-       ;; h/l wrap around to next lines
-       evil-cross-lines t)
-
-      ;; esc should always quit: http://stackoverflow.com/a/10166400/61435
-      (define-key evil-normal-state-map [escape] 'keyboard-quit)
-      (define-key evil-visual-state-map [escape] 'keyboard-quit)
-      (define-key minibuffer-local-map [escape] 'abort-recursive-edit)
-      (define-key minibuffer-local-ns-map [escape] 'abort-recursive-edit)
-      (define-key minibuffer-local-completion-map [escape] 'abort-recursive-edit)
-      (define-key minibuffer-local-must-match-map [escape] 'abort-recursive-edit)
-      (define-key minibuffer-local-isearch-map [escape] 'abort-recursive-edit)
-
-      ;; modes to map to different default states
-      (evil-set-initial-state 'calendar-mode 'emacs)
-      (evil-set-initial-state 'org-mode 'emacs)
-      (evil-set-initial-state 'elfeed-search 'emacs)))
+  (setq yas-prompt-functions '(yas-popup-isearch-prompt yas-ido-prompt yas-no-prompt))
 #+END_SRC
